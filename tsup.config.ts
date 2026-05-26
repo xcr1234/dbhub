@@ -14,7 +14,10 @@ export default defineConfig({
   // CJS code into ESM chunks (which causes "Dynamic require of X is not
   // supported"). Cloud auth packages are externalized to keep their large
   // dependency trees out of the bundle.
-  external: ['pg', 'mysql2', 'mariadb', 'mssql', 'better-sqlite3', '@aws-sdk/rds-signer', '@azure/identity'],
+  external: [
+    'pg', 'mysql2', 'mariadb', 'mssql', 'better-sqlite3', '@aws-sdk/rds-signer', '@azure/identity',
+    'oracledb',   'sql.js',
+  ],
   // Copy the employee-sqlite demo data to dist
   async onSuccess() {
     // Create target directory
