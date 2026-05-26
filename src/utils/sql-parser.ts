@@ -160,6 +160,15 @@ function scanTokenSQLServer(sql: string, i: number): SQLToken {
     ?? plainToken(i);
 }
 
+function scanTokenOracle(sql: string, i: number): SQLToken {
+  // Oracle 的基础块级语法与 ANSI 一致
+  return scanSingleLineComment(sql, i)
+    ?? scanMultiLineComment(sql, i)
+    ?? scanSingleQuotedString(sql, i)
+    ?? scanDoubleQuotedString(sql, i)
+    ?? plainToken(i);
+}
+
 type TokenScanner = (sql: string, i: number) => SQLToken;
 
 const dialectScanners: Record<ConnectorType, TokenScanner> = {
@@ -168,6 +177,7 @@ const dialectScanners: Record<ConnectorType, TokenScanner> = {
   mariadb: scanTokenMySQL,
   sqlite: scanTokenSQLite,
   sqlserver: scanTokenSQLServer,
+  oracle: scanTokenOracle,
 };
 
 function getScanner(dialect?: ConnectorType): TokenScanner {

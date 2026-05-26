@@ -8,6 +8,7 @@ Add oracle support, example:
 [[sources]]
 id = "oracle_db"
 dsn = "oracle://SYSTEM:MyStrongPassword123@localhost:1521/FREEPDB1"
+type = "oracle"
 ```
 
  
