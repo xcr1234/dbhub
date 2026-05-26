@@ -10,6 +10,7 @@ const connectorModules = [
   { load: () => import("./connectors/sqlite/index.js"), name: "SQLite", driver: "better-sqlite3" },
   { load: () => import("./connectors/mysql/index.js"), name: "MySQL", driver: "mysql2" },
   { load: () => import("./connectors/mariadb/index.js"), name: "MariaDB", driver: "mariadb" },
+  { load: () => import("./connectors/oracle/index.js"), name: "Oracle", driver: "oracle" },
 ];
 
 loadConnectors(connectorModules)
