@@ -1,6 +1,6 @@
 {
   "name": "@xcr1234/dbhub-fork",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "mcpName": "io.github.xcr1234/dbhub",
   "description": "Minimal, token-efficient Database MCP Server for PostgreSQL, MySQL, SQL Server, SQLite, MariaDB",
   "repository": {
