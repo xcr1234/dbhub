@@ -1,11 +1,11 @@
 {
-  "name": "dbhub",
-  "version": "0.21.2",
-  "mcpName": "io.github.bytebase/dbhub",
+  "name": "@xcr1234/dbhub",
+  "version": "1.0.0",
+  "mcpName": "io.github.xcr1234/dbhub",
   "description": "Minimal, token-efficient Database MCP Server for PostgreSQL, MySQL, SQL Server, SQLite, MariaDB",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytebase/dbhub.git"
+    "url": "https://github.com/xcr1234/dbhub.git"
   },
   "main": "dist/index.js",
   "type": "module",
@@ -47,8 +47,6 @@
     "@modelcontextprotocol/sdk": "^1.25.1",
     "dotenv": "^16.4.7",
     "express": "^4.18.2",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^6.0.1",
     "ssh-config": "^5.0.3",
     "ssh2": "^1.16.0",
     "zod": "^3.24.2"
@@ -60,7 +58,8 @@
     "mssql": "^11.0.1",
     "mysql2": "^3.13.0",
     "oracledb": "^6.10.0",
-    "pg": "^8.13.3"
+    "pg": "^8.13.3",
+    "sql.js": "^1.14.1"
   },
   "devDependencies": {
     "@testcontainers/mariadb": "^11.0.3",

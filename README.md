@@ -1,4 +1,17 @@
-> [!NOTE]  
+# My fork version
+
+Remove better-sqlite3
+
+Add oracle support, example:
+
+```toml
+[[sources]]
+id = "oracle_db"
+dsn = "oracle://SYSTEM:MyStrongPassword123@localhost:1521/FREEPDB1"
+```
+
+ 
+> > [!NOTE]  
 > Brought to you by [Bytebase](https://www.bytebase.com/), open-source database DevSecOps platform.
 
 <p align="center">

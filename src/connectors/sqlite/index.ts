@@ -1,9 +1,12 @@
 /**
- * SQLite Connector Implementation (No C/C++ compilation required for standard platforms)
+ * SQLite Connector Implementation (WebAssembly Version - No C/C++ compilation)
  *
- * Implements SQLite database connectivity for DBHub using 'sqlite' and 'sqlite3' (Pre-built binaries)
+ * Implements SQLite database connectivity for DBHub using 'sql.js'
  * To use this connector: Set DSN=sqlite:///path/to/database.db in your .env file
  */
+
+import fs from "fs/promises";
+import initSqlJs, { Database, SqlJsStatic } from "sql.js";
 
 import {
   Connector,
@@ -17,8 +20,6 @@ import {
   ExecuteOptions,
   ConnectorConfig,
 } from "../interface.js";
-import sqlite3 from "sqlite3";
-import { open, Database } from "sqlite";
 import { quoteIdentifier } from "../../utils/identifier-quoter.js";
 import { SafeURL } from "../../utils/safe-url.js";
 import { obfuscateDSNPassword } from "../../utils/dsn-obfuscate.js";
@@ -91,6 +92,7 @@ export class SQLiteConnector implements Connector {
 
   private db: Database | null = null;
   private dbPath: string = ":memory:";
+  private SQL: SqlJsStatic | null = null;
 
   private sourceId: string = "default";
 
@@ -102,29 +104,84 @@ export class SQLiteConnector implements Connector {
     return new SQLiteConnector();
   }
 
+  // Helper method to save in-memory database to disk
+  private async saveToDisk(): Promise<void> {
+    if (this.dbPath !== ':memory:' && this.db) {
+      const data = this.db.export();
+      const buffer = Buffer.from(data);
+      await fs.writeFile(this.dbPath, buffer);
+    }
+  }
+
+  // Wrapper equivalent to sqlite3 db.all()
+  private async dbAll<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+    if (!this.db) throw new Error("Not connected to SQLite database");
+    const stmt = this.db.prepare(sql);
+    try {
+      if (params && params.length > 0) {
+        stmt.bind(params);
+      }
+      const rows: T[] = [];
+      while (stmt.step()) {
+        rows.push(stmt.getAsObject() as unknown as T);
+      }
+      return rows;
+    } finally {
+      stmt.free();
+    }
+  }
+
+  // Wrapper equivalent to sqlite3 db.get()
+  private async dbGet<T = any>(sql: string, params: any[] = []): Promise<T | undefined> {
+    const rows = await this.dbAll<T>(sql, params);
+    return rows.length > 0 ? rows[0] : undefined;
+  }
+
+  // Wrapper equivalent to sqlite3 db.run()
+  private async dbRun(sql: string, params: any[] = []): Promise<{ changes: number }> {
+    if (!this.db) throw new Error("Not connected to SQLite database");
+    this.db.run(sql, params);
+    return { changes: this.db.getRowsModified() };
+  }
+
   async connect(dsn: string, initScript?: string, config?: ConnectorConfig): Promise<void> {
     const parsedConfig = await this.dsnParser.parse(dsn, config);
     this.dbPath = parsedConfig.dbPath;
 
     try {
-      // Determine open mode
-      let mode = sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE;
-      if (config?.readonly && this.dbPath !== ':memory:') {
-        mode = sqlite3.OPEN_READONLY;
+      if (!this.SQL) {
+        // Initialize WebAssembly engine
+        this.SQL = await initSqlJs();
       }
 
-      // Open connection using 'sqlite' promise wrapper
-      this.db = await open({
-        filename: this.dbPath,
-        driver: sqlite3.Database,
-        mode: mode
-      });
+      if (this.dbPath === ':memory:') {
+        this.db = new this.SQL.Database();
+      } else {
+        try {
+          // Try to load existing file from disk into memory
+          const fileBuffer = await fs.readFile(this.dbPath);
+          this.db = new this.SQL.Database(fileBuffer);
+        } catch (err: any) {
+          if (err.code === 'ENOENT') {
+            // File does not exist
+            if (config?.readonly) {
+              throw new Error(`Database file not found in readonly mode: ${this.dbPath}`);
+            }
+            // Create new database and immediately save to verify write access
+            this.db = new this.SQL.Database();
+            await this.saveToDisk();
+          } else {
+            throw err;
+          }
+        }
+      }
 
       if (initScript) {
-        await this.db.exec(initScript);
+        this.db.run(initScript);
+        await this.saveToDisk();
       }
     } catch (error) {
-      console.error("Failed to connect to SQLite database:", error);
+      console.error("Failed to connect to SQLite database (sql.js):", error);
       throw error;
     }
   }
@@ -132,7 +189,8 @@ export class SQLiteConnector implements Connector {
   async disconnect(): Promise<void> {
     if (this.db) {
       try {
-        await this.db.close();
+        await this.saveToDisk(); // Ensure any pending changes are flushed
+        this.db.close();
         this.db = null;
       } catch (error) {
         console.error('Error during SQLite disconnect:', error);
@@ -148,28 +206,24 @@ export class SQLiteConnector implements Connector {
   }
 
   async getTables(schema?: string): Promise<string[]> {
-    if (!this.db) throw new Error("Not connected to SQLite database");
-
     try {
-      const rows = await this.db.all<SQLiteTableNameRow[]>(`
+      const rows = await this.dbAll<SQLiteTableNameRow[]>(`
         SELECT name FROM sqlite_master 
         WHERE type='table' AND name NOT LIKE 'sqlite_%'
         ORDER BY name
       `);
-      return rows.map((row) => row.name);
+      return rows.map((row: any) => row.name);
     } catch (error) {
       throw error;
     }
   }
 
   async tableExists(tableName: string, schema?: string): Promise<boolean> {
-    if (!this.db) throw new Error("Not connected to SQLite database");
-
     try {
-      const row = await this.db.get<SQLiteTableNameRow>(`
+      const row = await this.dbGet<SQLiteTableNameRow>(`
         SELECT name FROM sqlite_master 
         WHERE type='table' AND name = ?
-      `, tableName);
+      `, [tableName]);
       return !!row;
     } catch (error) {
       throw error;
@@ -177,17 +231,15 @@ export class SQLiteConnector implements Connector {
   }
 
   async getTableIndexes(tableName: string, schema?: string): Promise<TableIndex[]> {
-    if (!this.db) throw new Error("Not connected to SQLite database");
-
     try {
-      const indexInfoRows = await this.db.all<{ index_name: string; is_unique: number }[]>(`
+      const indexInfoRows = await this.dbAll<{ index_name: string; is_unique: number }>(`
         SELECT name as index_name, 0 as is_unique
         FROM sqlite_master 
         WHERE type = 'index' AND tbl_name = ?
-      `, tableName);
+      `, [tableName]);
 
       const quotedTableName = quoteIdentifier(tableName, "sqlite");
-      const indexListRows = await this.db.all<{ name: string; unique: number }[]>(
+      const indexListRows = await this.dbAll<{ name: string; unique: number }>(
         `PRAGMA index_list(${quotedTableName})`
       );
 
@@ -196,7 +248,7 @@ export class SQLiteConnector implements Connector {
         indexUniqueMap.set(indexListRow.name, indexListRow.unique === 1);
       }
 
-      const tableInfo = await this.db.all<SQLiteTableInfo[]>(
+      const tableInfo = await this.dbAll<SQLiteTableInfo>(
         `PRAGMA table_info(${quotedTableName})`
       );
 
@@ -205,7 +257,7 @@ export class SQLiteConnector implements Connector {
 
       for (const indexInfo of indexInfoRows) {
         const quotedIndexName = quoteIdentifier(indexInfo.index_name, "sqlite");
-        const indexDetailRows = await this.db.all<{ name: string }[]>(
+        const indexDetailRows = await this.dbAll<{ name: string }>(
           `PRAGMA index_info(${quotedIndexName})`
         );
         const columnNames = indexDetailRows.map((row) => row.name);
@@ -234,11 +286,9 @@ export class SQLiteConnector implements Connector {
   }
 
   async getTableSchema(tableName: string, schema?: string): Promise<TableColumn[]> {
-    if (!this.db) throw new Error("Not connected to SQLite database");
-
     try {
       const quotedTableName = quoteIdentifier(tableName, "sqlite");
-      const rows = await this.db.all<SQLiteTableInfo[]>(`PRAGMA table_info(${quotedTableName})`);
+      const rows = await this.dbAll<SQLiteTableInfo>(`PRAGMA table_info(${quotedTableName})`);
 
       return rows.map((row) => ({
         column_name: row.name,
@@ -268,6 +318,7 @@ export class SQLiteConnector implements Connector {
 
     try {
       const statements = splitSQLStatements(sql, "sqlite");
+      let dataModified = false;
 
       if (statements.length === 1) {
         let processedStatement = statements[0];
@@ -289,7 +340,7 @@ export class SQLiteConnector implements Connector {
         if (isReadStatement) {
           try {
             const params = parameters || [];
-            const rows = await this.db.all(processedStatement, ...params);
+            const rows = await this.dbAll(processedStatement, params);
             return { rows, rowCount: rows.length };
           } catch (error) {
             console.error(`[SQLite executeSQL] ERROR: ${(error as Error).message}`);
@@ -298,7 +349,8 @@ export class SQLiteConnector implements Connector {
         } else {
           try {
             const params = parameters || [];
-            const result = await this.db.run(processedStatement, ...params);
+            const result = await this.dbRun(processedStatement, params);
+            await this.saveToDisk(); // Persist changes immediately on write operations
             return { rows: [], rowCount: result.changes ?? 0 };
           } catch (error) {
             console.error(`[SQLite executeSQL] ERROR: ${(error as Error).message}`);
@@ -328,12 +380,17 @@ export class SQLiteConnector implements Connector {
 
           if (isReadStatement) {
             statement = SQLRowLimiter.applyMaxRows(statement, options.maxRows);
-            const rows = await this.db.all(statement);
+            const rows = await this.dbAll(statement);
             allRows.push(...rows);
           } else {
-            const result = await this.db.run(statement);
+            const result = await this.dbRun(statement);
             totalChanges += result.changes ?? 0;
+            dataModified = true;
           }
+        }
+
+        if (dataModified) {
+          await this.saveToDisk(); // Batch persist at the end of the transaction/multiple statements
         }
 
         return { rows: allRows, rowCount: totalChanges + allRows.length };
