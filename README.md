@@ -13,6 +13,8 @@ dsn = "oracle://SYSTEM:MyStrongPassword123@localhost:1521/FREEPDB1"
 ```
 
 3.implement the search_objects UI.
+
+![search-objects](docs/images/img.png)
  
 > > [!NOTE]  
 > Brought to you by [Bytebase](https://www.bytebase.com/), open-source database DevSecOps platform.
