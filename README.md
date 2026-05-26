@@ -6,6 +6,14 @@
 
 2.Add oracle support, for example:
 
+```bash
+ docker run -d \                                                   
+  --name oracle-test \
+  -p 1521:1521 \
+  -e ORACLE_PASSWORD=MyStrongPassword123 \
+  gvenzl/oracle-free:latest
+```
+
 ```toml
 [[sources]]
 id = "oracle_db"
