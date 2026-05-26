@@ -138,12 +138,17 @@ export class OracleConnector implements Connector {
     if (!this.pool) throw new Error("Not connected to database");
     const conn = await this.pool.getConnection();
     try {
+      // 使用 ORACLE_MAINTAINED = 'N' 过滤掉所有系统自带的 Schema (适用于 Oracle 12c+)
       const result = await conn.execute(`
-        SELECT USERNAME 
-        FROM ALL_USERS 
+        SELECT USERNAME
+        FROM ALL_USERS
+        WHERE ORACLE_MAINTAINED = 'N'
         ORDER BY USERNAME
       `);
       return (result.rows as any[]).map((row) => row.USERNAME);
+    } catch (error) {
+      console.error("Error getting schemas:", error);
+      throw error;
     } finally {
       await conn.close();
     }
