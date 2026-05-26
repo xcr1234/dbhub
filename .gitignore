@@ -90,3 +90,4 @@ $RECYCLE.BIN/
 *.exe
 *.o
 *.so 
+/.claude/
