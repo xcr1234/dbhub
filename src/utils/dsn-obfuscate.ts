@@ -151,19 +151,19 @@ export function obfuscateSSHConfig(config: SSHTunnelConfig): Partial<SSHTunnelCo
     port: config.port,
     username: config.username,
   };
-  
+
   if (config.password) {
     obfuscated.password = '*'.repeat(8);
   }
-  
+
   if (config.privateKey) {
     obfuscated.privateKey = config.privateKey; // Keep path as-is
   }
-  
+
   if (config.passphrase) {
     obfuscated.passphrase = '*'.repeat(8);
   }
-  
+
   return obfuscated;
 }
 
@@ -191,7 +191,8 @@ function protocolToConnectorType(protocol: string): ConnectorType | undefined {
     'mysql': 'mysql',
     'mariadb': 'mariadb',
     'sqlserver': 'sqlserver',
-    'sqlite': 'sqlite'
+    'sqlite': 'sqlite',
+    'oracle': 'oracle'
   };
   return mapping[protocol];
 }
@@ -208,6 +209,7 @@ export function getDefaultPortForType(type: ConnectorType): number | undefined {
     'mariadb': 3306,
     'sqlserver': 1433,
     'sqlite': undefined,
+    'oracle': 1521
   };
   return ports[type];
 }

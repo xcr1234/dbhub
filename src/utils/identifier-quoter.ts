@@ -34,6 +34,7 @@ export function quoteIdentifier(identifier: string, dbType: ConnectorType): stri
   switch (dbType) {
     case "postgres":
     case "sqlite":
+    case "oracle":
       // PostgreSQL and SQLite use double quotes
       // Escape existing double quotes by doubling them
       return `"${identifier.replace(/"/g, '""')}"`;

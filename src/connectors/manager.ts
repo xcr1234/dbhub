@@ -490,10 +490,10 @@ export class ConnectorManager {
       return dsn;
     }
 
-    const supportedIamTypes = ["postgres", "mysql", "mariadb"];
+    const supportedIamTypes = ["postgres", "mysql", "mariadb", "oracle"];
     if (!source.type || !supportedIamTypes.includes(source.type)) {
       throw new Error(
-        `Source '${source.id}': aws_iam_auth is only supported for postgres, mysql, and mariadb`
+        `Source '${source.id}': aws_iam_auth is only supported for postgres, mysql, oracle, and mariadb`
       );
     }
     if (!source.aws_region) {

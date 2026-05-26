@@ -274,11 +274,11 @@ function validateSourceConfig(source: SourceConfig, configPath: string): void {
   }
 
   if (source.aws_iam_auth === true) {
-    const validIamTypes = ["postgres", "mysql", "mariadb"];
+    const validIamTypes = ["postgres", "mysql", "mariadb", "oracle"];
     if (!source.type || !validIamTypes.includes(source.type)) {
       throw new Error(
         `Configuration file ${configPath}: source '${source.id}' has aws_iam_auth enabled, ` +
-          `but this is only supported for postgres, mysql, and mariadb sources.`
+          `but this is only supported for postgres, mysql, oracle, and mariadb sources.`
       );
     }
     if (!source.aws_region) {
@@ -604,7 +604,7 @@ export function buildDSNFromSource(source: SourceConfig): string {
   // Password is optional for Azure AD access token authentication and AWS IAM auth
   const isAwsIamPasswordless =
     source.aws_iam_auth === true &&
-    ["postgres", "mysql", "mariadb"].includes(source.type);
+    ["postgres", "mysql", "mariadb", "oracle"].includes(source.type);
   const passwordRequired =
     source.authentication !== "azure-active-directory-access-token" &&
     !isAwsIamPasswordless;

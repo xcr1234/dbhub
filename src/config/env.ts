@@ -176,7 +176,7 @@ export function buildDSNFromEnvParams(): { dsn: string; source: string } | null 
   }
 
   // Validate supported database types
-  const supportedTypes = ['postgres', 'postgresql', 'mysql', 'mariadb', 'sqlserver', 'sqlite'];
+  const supportedTypes = ['postgres', 'postgresql', 'mysql', 'mariadb', 'sqlserver', 'sqlite', 'oracle'];
   if (!supportedTypes.includes(dbType.toLowerCase())) {
     throw new Error(`Unsupported DB_TYPE: ${dbType}. Supported types: ${supportedTypes.join(', ')}`);
   }
@@ -195,6 +195,9 @@ export function buildDSNFromEnvParams(): { dsn: string; source: string } | null 
         break;
       case 'sqlserver':
         port = '1433';
+        break;
+      case 'oracle':
+        port = '1521';
         break;
       case 'sqlite':
         // SQLite doesn't use host/port, handle differently
@@ -418,7 +421,7 @@ export function resolveSSHConfig(): { config: SSHTunnelConfig; source: string } 
       // Use SSH config as base, but allow command line/env to override
       config = { ...sshConfigData };
       sources.push(`SSH config for host '${sshConfigHost}'`);
-      
+
       // The host from SSH config has already been set, no need to override
     }
   }
@@ -568,7 +571,7 @@ export async function resolveSourceConfigs(): Promise<{ sources: SourceConfig[];
     const protocol = dsnUrl.protocol.replace(':', '');
 
     // Map protocol to database type
-    let dbType: "postgres" | "mysql" | "mariadb" | "sqlserver" | "sqlite";
+    let dbType: "postgres" | "mysql" | "mariadb" | "sqlserver" | "sqlite" | "oracle";
     if (protocol === 'postgresql' || protocol === 'postgres') {
       dbType = 'postgres';
     } else if (protocol === 'mysql') {
@@ -579,7 +582,9 @@ export async function resolveSourceConfigs(): Promise<{ sources: SourceConfig[];
       dbType = 'sqlserver';
     } else if (protocol === 'sqlite') {
       dbType = 'sqlite';
-    } else {
+    }else if (protocol === 'oracle') {
+      dbType = 'oracle';
+    }  else {
       throw new Error(`Unsupported database type in DSN: ${protocol}`);
     }
 
