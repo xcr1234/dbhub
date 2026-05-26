@@ -1,5 +1,7 @@
 # My fork version
 
+`npm i @xcr1234/dbhub-fork`
+
 Remove better-sqlite3
 
 Add oracle support, example:
@@ -8,7 +10,6 @@ Add oracle support, example:
 [[sources]]
 id = "oracle_db"
 dsn = "oracle://SYSTEM:MyStrongPassword123@localhost:1521/FREEPDB1"
-type = "oracle"
 ```
 
  
