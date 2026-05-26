@@ -34,7 +34,8 @@
     "test:unit": "vitest run --project unit",
     "test:watch": "vitest",
     "test:integration": "vitest run --project integration",
-    "test:build": "node scripts/smoke-test-build.mjs"
+    "test:build": "node scripts/smoke-test-build.mjs",
+    "publish": "npm publish --registry=https://registry.npmjs.org/ --access public"
   },
   "engines": {
     "node": ">=20"
