@@ -69,22 +69,39 @@ export async function executeTool(
     throw new ApiError(toolResult.error || 'Tool execution failed', 500);
   }
 
-  if (!toolResult.data || !toolResult.data.rows) {
-    return { columns: [], rows: [], rowCount: 0 };
+  // search_objects returns {success, data: {object_type, pattern, count, results, ...}}
+  // execute_sql returns {success, data: {rows, count, source_id}}
+  // Normalize: extract the inner data, handling different response formats
+  const innerData = toolResult.data as Record<string, any>;
+
+  // Check if data has rows (execute_sql format) or results (search_objects format)
+  if (innerData.rows !== undefined) {
+    // execute_sql format
+    const rows = innerData.rows;
+    if (rows.length === 0) {
+      return { columns: [], rows: [], rowCount: innerData.count };
+    }
+    const columns = Object.keys(rows[0]);
+    const rowArrays = rows.map((row: Record<string, any>) => columns.map((col) => row[col]));
+    return {
+      columns,
+      rows: rowArrays,
+      rowCount: innerData.count,
+    };
+  } else if (innerData.results !== undefined) {
+    // search_objects format
+    const results = innerData.results;
+    if (results.length === 0) {
+      return { columns: [], rows: [], rowCount: innerData.count };
+    }
+    const columns = Object.keys(results[0]);
+    const rowArrays = results.map((row: Record<string, any>) => columns.map((col) => row[col]));
+    return {
+      columns,
+      rows: rowArrays,
+      rowCount: innerData.count,
+    };
   }
 
-  const rows = toolResult.data.rows;
-  if (rows.length === 0) {
-    // For INSERT/UPDATE/DELETE, rows is empty but count reflects affected rows
-    return { columns: [], rows: [], rowCount: toolResult.data.count };
-  }
-
-  const columns = Object.keys(rows[0]);
-  const rowArrays = rows.map((row) => columns.map((col) => row[col]));
-
-  return {
-    columns,
-    rows: rowArrays,
-    rowCount: toolResult.data.count,
-  };
+  return { columns: [], rows: [], rowCount: 0 };
 }

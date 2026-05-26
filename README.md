@@ -2,9 +2,9 @@
 
 `npm i @xcr1234/dbhub-fork`
 
-Remove better-sqlite3
+1. Remove better-sqlite3
 
-Add oracle support, example:
+2.Add oracle support, for example:
 
 ```toml
 [[sources]]
@@ -12,6 +12,7 @@ id = "oracle_db"
 dsn = "oracle://SYSTEM:MyStrongPassword123@localhost:1521/FREEPDB1"
 ```
 
+3.implement the search_objects UI.
  
 > > [!NOTE]  
 > Brought to you by [Bytebase](https://www.bytebase.com/), open-source database DevSecOps platform.

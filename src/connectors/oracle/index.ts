@@ -142,7 +142,6 @@ export class OracleConnector implements Connector {
       const result = await conn.execute(`
         SELECT USERNAME
         FROM ALL_USERS
-        WHERE ORACLE_MAINTAINED = 'N'
         ORDER BY USERNAME
       `);
       return (result.rows as any[]).map((row) => row.USERNAME);

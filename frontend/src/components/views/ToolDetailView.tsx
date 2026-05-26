@@ -5,6 +5,8 @@ import { executeTool, type QueryResult } from '../../api/tools';
 import { ApiError } from '../../api/errors';
 import type { Tool } from '../../types/datasource';
 import { SqlEditor, ParameterForm, RunButton, ResultsTabs, type ResultTab, type SqlEditorHandle } from '../tool';
+import { Input } from '../ui/input';
+import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from '../ui/select';
 import LockIcon from '../icons/LockIcon';
 import CopyIcon from '../icons/CopyIcon';
 import CheckIcon from '../icons/CheckIcon';
@@ -29,6 +31,13 @@ export default function ToolDetailView() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // search_objects form state
+  const [searchObjectType, setSearchObjectType] = useState<string>('table');
+  const [searchPattern, setSearchPattern] = useState<string>('%');
+  const [searchSchema, setSearchSchema] = useState<string>('');
+  const [searchTable, setSearchTable] = useState<string>('');
+  const [searchDetailLevel, setSearchDetailLevel] = useState<string>('names');
 
   useEffect(() => {
     if (!sourceId || !toolName) return;
@@ -278,6 +287,54 @@ export default function ToolDetailView() {
     });
   }, [activeTabId]);
 
+  // Run search_objects query
+  const handleSearchRun = useCallback(async () => {
+    if (!tool || !toolName) return;
+
+    setIsRunning(true);
+
+    const startTime = performance.now();
+
+    try {
+      const args: Record<string, any> = {
+        object_type: searchObjectType,
+        pattern: searchPattern || '%',
+        detail_level: searchDetailLevel,
+      };
+      if (searchSchema) args.schema = searchSchema;
+      if (searchTable) args.table = searchTable;
+
+      const queryResult = await executeTool(toolName, args);
+
+      const endTime = performance.now();
+      const duration = endTime - startTime;
+
+      const newTab: ResultTab = {
+        id: crypto.randomUUID(),
+        timestamp: new Date(),
+        result: queryResult,
+        error: null,
+        executedSql: `search_objects(object_type=${searchObjectType}, pattern=${searchPattern || '%'}, detail_level=${searchDetailLevel})`,
+        executionTimeMs: duration,
+      };
+      setResultTabs(prev => [newTab, ...prev]);
+      setActiveTabId(newTab.id);
+    } catch (err) {
+      const errorTab: ResultTab = {
+        id: crypto.randomUUID(),
+        timestamp: new Date(),
+        result: null,
+        error: err instanceof Error ? err.message : 'Query failed',
+        executedSql: `search_objects(object_type=${searchObjectType}, pattern=${searchPattern || '%'})`,
+        executionTimeMs: 0,
+      };
+      setResultTabs(prev => [errorTab, ...prev]);
+      setActiveTabId(errorTab.id);
+    } finally {
+      setIsRunning(false);
+    }
+  }, [tool, toolName, searchObjectType, searchPattern, searchSchema, searchTable, searchDetailLevel]);
+
   if (!sourceId || !toolName) {
     return <Navigate to="/" replace />;
   }
@@ -324,11 +381,95 @@ export default function ToolDetailView() {
             )}
           </div>
           <p className="text-muted-foreground leading-relaxed">{tool.description}</p>
-          <div className="border border-border rounded-lg bg-card p-8 text-center">
-            <p className="text-muted-foreground">
-              Interactive UI for this tool is coming soon.
-            </p>
+
+          {/* Search Form */}
+          <div className="border border-border rounded-lg bg-card p-6 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">Object Type</label>
+                <Select value={searchObjectType} onValueChange={(v) => v && setSearchObjectType(v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value="schema">Schema</SelectItem>
+                    <SelectItem value="table">Table</SelectItem>
+                    <SelectItem value="column">Column</SelectItem>
+                    <SelectItem value="procedure">Procedure</SelectItem>
+                    <SelectItem value="function">Function</SelectItem>
+                    <SelectItem value="index">Index</SelectItem>
+                  </SelectPopup>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">Detail Level</label>
+                <Select value={searchDetailLevel} onValueChange={(v) => v && setSearchDetailLevel(v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value="names">Names</SelectItem>
+                    <SelectItem value="summary">Summary</SelectItem>
+                    <SelectItem value="full">Full</SelectItem>
+                  </SelectPopup>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Pattern
+                <span className="text-muted-foreground ml-1.5 font-normal">(optional, default: %)</span>
+              </label>
+              <Input
+                type="text"
+                value={searchPattern}
+                onChange={(e) => setSearchPattern(e.target.value)}
+                placeholder="e.g., %user% or exact_name"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">
+                  Schema
+                  <span className="text-muted-foreground ml-1.5 font-normal">(optional)</span>
+                </label>
+                <Input
+                  type="text"
+                  value={searchSchema}
+                  onChange={(e) => setSearchSchema(e.target.value)}
+                  placeholder="e.g., public"
+                />
+              </div>
+              {(searchObjectType === 'column' || searchObjectType === 'index') && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">
+                    Table
+                    <span className="text-muted-foreground ml-1.5 font-normal">(optional)</span>
+                  </label>
+                  <Input
+                    type="text"
+                    value={searchTable}
+                    onChange={(e) => setSearchTable(e.target.value)}
+                    placeholder="e.g., users"
+                  />
+                </div>
+              )}
+            </div>
+            <RunButton
+              onClick={handleSearchRun}
+              disabled={isRunning}
+              loading={isRunning}
+            />
           </div>
+
+          {/* Results */}
+          <ResultsTabs
+            tabs={resultTabs}
+            activeTabId={activeTabId}
+            onTabSelect={setActiveTabId}
+            onTabClose={handleTabClose}
+            isLoading={isRunning}
+          />
         </div>
       </div>
     );
