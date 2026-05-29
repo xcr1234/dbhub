@@ -16,6 +16,7 @@ export const PARAMETER_STYLES = {
   mariadb: "positional", // ?, ?, ?
   sqlserver: "named", // @p1, @p2, @p3
   sqlite: "positional", // ?, ?, ?
+  oracle: 'colon' , // :1 , :2 , :3
 } as const;
 
 /**
@@ -26,7 +27,7 @@ export const PARAMETER_STYLES = {
  */
 export function detectParameterStyle(
   statement: string
-): "numbered" | "positional" | "named" | "none" {
+): "numbered" | "positional" | "named" | "colon" | "none" {
   // Strip comments and strings to avoid matching parameters inside them
   const cleanedSQL = stripCommentsAndStrings(statement);
 
@@ -38,6 +39,11 @@ export function detectParameterStyle(
   // Check for SQL Server-style named parameters (@p1, @p2, etc.)
   if (/@p\d+/.test(cleanedSQL)) {
     return "named";
+  }
+
+  // Check for Oracle-style colon parameters (:1, :2, etc.)
+  if (/:\d+/.test(cleanedSQL)) {
+    return "colon";
   }
 
   // Check for positional parameters (?)
@@ -71,6 +77,7 @@ export function validateParameterStyle(
       numbered: "$1, $2, $3",
       positional: "?, ?, ?",
       named: "@p1, @p2, @p3",
+      colon: ":1, :2, :3",
     };
 
     throw new Error(
@@ -137,6 +144,26 @@ export function countParameters(statement: string): number {
     case "positional": {
       // Count question marks (positional parameters don't have this issue)
       return (cleanedSQL.match(/\?/g) || []).length;
+    }
+    case "colon": {
+      // Extract all :N parameters and get unique indices
+      const matches = cleanedSQL.match(/:\d+/g);
+      if (!matches) return 0;
+      const numbers = matches.map((m) => parseInt(m.slice(1), 10));
+      const uniqueIndices = Array.from(new Set(numbers)).sort((a, b) => a - b);
+
+      // Validate parameters are sequential starting from 1
+      const maxIndex = Math.max(...uniqueIndices);
+      for (let i = 1; i <= maxIndex; i++) {
+        if (!uniqueIndices.includes(i)) {
+          throw new Error(
+            `Non-sequential colon parameters detected. Found placeholders: ${uniqueIndices.map(n => `:${n}`).join(', ')}. ` +
+            `Parameters must be sequential starting from :1 (missing :${i}).`
+          );
+        }
+      }
+
+      return maxIndex;
     }
     default:
       return 0;
