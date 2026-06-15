@@ -17,6 +17,15 @@ import { SQLRowLimiter } from "../../utils/sql-row-limiter.js";
 import { splitSQLStatements } from "../../utils/sql-parser.js";
 import { quoteIdentifier } from "../../utils/identifier-quoter.js";
 
+
+const oracleClientPath = process.env.ORACLE_CLIENT_LIB_DIR
+
+if(oracleClientPath){
+  oracledb.initOracleClient({
+    libDir: oracleClientPath
+  })
+}
+
 /**
  * Oracle DSN Parser
  * Handles DSN strings like: oracle://user:password@localhost:1521/XEPDB1
