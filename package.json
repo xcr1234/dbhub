@@ -1,6 +1,6 @@
 {
   "name": "@xcr1234/dbhub-fork",
-  "version": "1.7.0",
+  "version": "1.9.0",
   "mcpName": "io.github.xcr1234/dbhub",
   "description": "Minimal, token-efficient Database MCP Server for PostgreSQL, MySQL, SQL Server, SQLite, MariaDB",
   "repository": {
@@ -34,7 +34,8 @@
     "test:unit": "vitest run --project unit",
     "test:watch": "vitest",
     "test:integration": "vitest run --project integration",
-    "test:build": "node scripts/smoke-test-build.mjs"
+    "test:build": "node scripts/smoke-test-build.mjs",
+    "publish:npm": "npm run build:npm && npm publish --registry=https://registry.npmjs.org"
   },
   "engines": {
     "node": ">=20"

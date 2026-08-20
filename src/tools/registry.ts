@@ -3,14 +3,14 @@
  * Manages tool enablement and configuration across multiple database sources
  */
 
-import type { TomlConfig, ToolConfig, ExecuteSqlToolConfig, SearchObjectsToolConfig, ParameterConfig } from "../types/config.js";
-import { BUILTIN_TOOLS } from "./builtin-tools.js";
+import type { TomlConfig, ToolConfig, ExecuteSqlToolConfig, SearchObjectsToolConfig, ExplainSqlToolConfig, ParameterConfig } from "../types/config.js";
+import { BUILTIN_TOOLS, ALL_BUILTIN_TOOL_NAMES, BUILTIN_TOOL_EXECUTE_SQL, BUILTIN_TOOL_SEARCH_OBJECTS, BUILTIN_TOOL_EXPLAIN_SQL } from "./builtin-tools.js";
 import { ConnectorManager } from "../connectors/manager.js";
 import { validateParameters } from "../utils/parameter-mapper.js";
 
 /**
  * Registry for managing tools across multiple database sources
- * Handles both built-in tools (execute_sql, search_objects) and custom tools
+ * Handles built-in tools (execute_sql, search_objects, explain_sql) and custom tools
  */
 export class ToolRegistry {
   private toolsBySource: Map<string, ToolConfig[]>;
@@ -21,9 +21,13 @@ export class ToolRegistry {
 
   /**
    * Check if a tool name is a built-in tool
+   * Uses ALL_BUILTIN_TOOL_NAMES (not BUILTIN_TOOLS) so opt-in tools like
+   * explain_sql are recognized as built-in when explicitly enabled via
+   * [[tools]] config — without that, the registry would treat them as
+   * custom tools and reject them for missing `statement` fields.
    */
   private isBuiltinTool(toolName: string): boolean {
-    return BUILTIN_TOOLS.includes(toolName);
+    return (ALL_BUILTIN_TOOL_NAMES as readonly string[]).includes(toolName);
   }
 
   /**
@@ -116,14 +120,14 @@ export class ToolRegistry {
     }
 
     // 3. Validate tool name doesn't conflict with built-in tools
-    for (const builtinName of BUILTIN_TOOLS) {
+    for (const builtinName of ALL_BUILTIN_TOOL_NAMES) {
       if (
         toolConfig.name === builtinName ||
         toolConfig.name.startsWith(`${builtinName}_`)
       ) {
         throw new Error(
           `Tool name '${toolConfig.name}' conflicts with built-in tool naming pattern. ` +
-            `Custom tools cannot use names starting with: ${BUILTIN_TOOLS.join(", ")}`
+            `Custom tools cannot use names starting with: ${ALL_BUILTIN_TOOL_NAMES.join(", ")}`
         );
       }
     }
@@ -184,11 +188,22 @@ export class ToolRegistry {
     for (const source of config.sources) {
       if (!registry.has(source.id)) {
         const defaultTools: ToolConfig[] = BUILTIN_TOOLS.map((name) => {
-          // Create properly typed tool configs based on the tool name
-          if (name === 'execute_sql') {
-            return { name: 'execute_sql', source: source.id } satisfies ExecuteSqlToolConfig;
+          // Create properly typed tool configs based on the tool name.
+          // Each built-in name gets its OWN entry — the previous
+          // implementation collapsed all non-execute_sql defaults into a
+          // single `search_objects` config, which caused duplicate
+          // registration ("Tool search_objects is already registered")
+          // when BUILTIN_TOOLS grew beyond two entries.
+          if (name === BUILTIN_TOOL_EXECUTE_SQL) {
+            return { name: BUILTIN_TOOL_EXECUTE_SQL, source: source.id } satisfies ExecuteSqlToolConfig;
+          } else if (name === BUILTIN_TOOL_SEARCH_OBJECTS) {
+            return { name: BUILTIN_TOOL_SEARCH_OBJECTS, source: source.id } satisfies SearchObjectsToolConfig;
+          } else if (name === BUILTIN_TOOL_EXPLAIN_SQL) {
+            return { name: BUILTIN_TOOL_EXPLAIN_SQL, source: source.id } satisfies ExplainSqlToolConfig;
           } else {
-            return { name: 'search_objects', source: source.id } satisfies SearchObjectsToolConfig;
+            throw new Error(
+              `Internal error: default-built-in tool '${name}' is not handled by registry default-enable logic`
+            );
           }
         });
         registry.set(source.id, defaultTools);

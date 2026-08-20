@@ -102,6 +102,13 @@ export class OracleConnector implements Connector {
       // Set to output objects instead of arrays by default
       oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
       // Optional: Initialize Oracle Client (Thin mode is default in oracledb 6.0+)
+      // Allow ORACLE_CLIENT_LIB_DIR env var to switch to Thick mode with a local Oracle Client lib path.
+      const oracleClientPath = process.env.ORACLE_CLIENT_LIB_DIR;
+      if (oracleClientPath) {
+        oracledb.initOracleClient({
+          libDir: oracleClientPath,
+        });
+      }
 
       const poolOptions = await this.dsnParser.parse(dsn, config);
       this.pool = await oracledb.createPool(poolOptions);

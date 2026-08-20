@@ -71,6 +71,17 @@ export class ConnectorManager {
     const sourceId = source.id;
     const dsn = buildDSNFromSource(source);
 
+    // Guard against duplicate registration. The hot-reload path in
+    // src/utils/config-watcher.ts can re-enter this code with the same
+    // source on every config save; without the dedup check, sourceIds
+    // accumulates ["xiuxian", "xiuxian", ...] which causes metadata to
+    // compute isSingleSource=false and generate identical
+    // "search_objects_xiuxian" tool names twice — MCP SDK then throws
+    // "Tool ... is already registered" inside registerTools.
+    if (this.sourceIds.includes(sourceId)) {
+      return;
+    }
+
     console.error(`  - ${sourceId}: ${redactDSN(dsn)} (lazy, will connect on first use)`);
 
     // Store config for later connection

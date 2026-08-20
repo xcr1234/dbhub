@@ -66,6 +66,15 @@ const explainAnalyzePattern =
   /^explain\s+(?:\([^)]*\banalyze\b(?!\s*(?:=\s*)?(?:false|off|0)\b)[^)]*\)|\banalyze\b(?!\s*(?:=\s*)?(?:false|off|0)\b)(?:\s+verbose\b)?)/i;
 
 /**
+ * Extract the first SQL keyword (lowercased, trimmed) from a statement that
+ * has already had comments and string literals stripped. Returns "" when the
+ * cleaned statement is empty, so callers can fail-closed.
+ */
+export function getFirstKeyword(cleanedSQL: string): string {
+  return cleanedSQL.match(/\S+/)?.[0]?.toLowerCase() ?? "";
+}
+
+/**
  * Check if a SQL query is read-only.
  * 1. Strips comments and string literals before analyzing.
  * 2. Verifies the first keyword is in the allow-list.
