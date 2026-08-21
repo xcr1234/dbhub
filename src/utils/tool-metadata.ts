@@ -3,6 +3,7 @@ import { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { ConnectorManager } from "../connectors/manager.js";
 import { normalizeSourceId } from "./normalize-id.js";
 import { executeSqlSchema } from "../tools/execute-sql.js";
+import { explainSqlSchema } from "../tools/explain-sql.js";
 import { getToolRegistry } from "../tools/registry.js";
 import { BUILTIN_TOOL_EXECUTE_SQL } from "../tools/builtin-tools.js";
 import type { ParameterConfig, ToolConfig } from "../types/config.js";
@@ -194,6 +195,52 @@ export function getSearchObjectsMetadata(sourceId: string): { name: string; desc
 }
 
 /**
+ * Get explain_sql tool metadata for a specific source
+ * @param sourceId - The source ID to get tool metadata for
+ * @returns Tool metadata with name, description, schema, and annotations
+ */
+export function getExplainSqlMetadata(sourceId: string): ToolMetadata {
+  const sourceIds = ConnectorManager.getAvailableSourceIds();
+  const sourceConfig = ConnectorManager.getSourceConfig(sourceId)!;
+  const dbType = sourceConfig.type;
+  const isSingleSource = sourceIds.length === 1;
+
+  // Determine tool name based on single vs multi-source configuration
+  const toolName = isSingleSource ? "explain_sql" : `explain_sql_${normalizeSourceId(sourceId)}`;
+
+  // Determine title (human-readable display name)
+  const title = isSingleSource
+    ? `Explain SQL (${dbType})`
+    : `Explain SQL on ${sourceId} (${dbType})`;
+
+  // Prepend the user-provided `description` from the source config (if set)
+  // so AI clients reading the MCP tool list see the source's purpose first.
+  const userDescPrefix = buildSourceDescriptionPrefix(sourceConfig.description);
+  const description = isSingleSource
+    ? `${userDescPrefix}Show the execution plan for a single SQL statement without running it on the ${dbType} database`
+    : `${userDescPrefix}Show the execution plan for a single SQL statement without running it on the '${sourceId}' ${dbType} database`;
+
+  // explain_sql is always read-only: it never executes the target statement
+  // (plain EXPLAIN without ANALYZE is side-effect free on every supported
+  // engine; Oracle uses EXPLAIN PLAN FOR + DBMS_XPLAN.DISPLAY, also side-
+  // effect free).
+  const annotations: ToolAnnotations = {
+    title,
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  };
+
+  return {
+    name: toolName,
+    description,
+    schema: explainSqlSchema,
+    annotations,
+  };
+}
+
+/**
  * Convert custom tool parameter configs to Tool parameter format
  * @param params - Parameter configurations from custom tool
  * @returns Array of tool parameters
@@ -284,6 +331,27 @@ function buildSearchObjectsTool(sourceId: string): Tool {
 }
 
 /**
+ * Build explain_sql tool metadata for API response
+ */
+function buildExplainSqlTool(sourceId: string): Tool {
+  const explainMetadata = getExplainSqlMetadata(sourceId);
+
+  return {
+    name: explainMetadata.name,
+    description: explainMetadata.description,
+    parameters: [
+      {
+        name: "sql",
+        type: "string",
+        required: true,
+        description: "Single SQL statement to explain (no trailing semicolon-separated statements)",
+      },
+    ],
+    readonly: true, // explain_sql is always readonly
+  };
+}
+
+/**
  * Build custom tool metadata for API response
  */
 function buildCustomTool(toolConfig: ToolConfig): Tool {
@@ -315,6 +383,8 @@ export function getToolsForSource(sourceId: string): Tool[] {
       return buildExecuteSqlTool(sourceId, toolConfig);
     } else if (toolConfig.name === "search_objects") {
       return buildSearchObjectsTool(sourceId);
+    } else if (toolConfig.name === "explain_sql") {
+      return buildExplainSqlTool(sourceId);
     } else {
       // Custom tool
       return buildCustomTool(toolConfig);
