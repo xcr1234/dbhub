@@ -460,10 +460,13 @@ export class OracleConnector implements Connector {
 
       const result = await conn.execute(processedSQL, parameters || [], execOptions);
 
-      return {
-        rows: (result.rows as any[]) || [],
-        rowCount: result.rowsAffected || 0,
-      };
+      const rows = (result.rows as any[]) || [];
+      // SELECT/EXPLAIN return rows but rowsAffected is undefined (so || 0 collapses
+      // to 0 and the caller sees a misleading "empty" result). DML leaves rows
+      // empty but populates rowsAffected. Prefer rows.length when present.
+      const rowCount = rows.length > 0 ? rows.length : (result.rowsAffected || 0);
+
+      return { rows, rowCount };
     } catch (error) {
       console.error("Error executing query:", error);
       throw error;

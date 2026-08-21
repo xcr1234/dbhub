@@ -146,6 +146,24 @@ export function createExplainSqlToolHandler(sourceId?: string) {
       if (connector.id === "oracle") {
         const readbackSQL = buildPlanReadbackStatement(connector.id);
         result = await connector.executeSQL(readbackSQL, { readonly: true });
+
+        // Oracle returns the formatted plan as one row per line via DBMS_XPLAN.
+        // Collapse them into a single multi-line string so AI clients can read
+        // the plan at a glance without reassembling `rows[].PLAN_TABLE_OUTPUT`.
+        // Rows/count are intentionally dropped for oracle: plan_text is the
+        // canonical representation, the raw rows are redundant, and count is
+        // tightly coupled to rows (no rows → no count). Other dialects return
+        // structured columns and keep the rows/count contract unchanged.
+        if (result.rows.length > 0 && "PLAN_TABLE_OUTPUT" in result.rows[0]) {
+          const planText = result.rows
+            .map((row: any) => String(row.PLAN_TABLE_OUTPUT ?? ""))
+            .join("\n");
+          return createToolSuccessResponse({
+            plan_text: planText,
+            source_id: effectiveSourceId,
+            ...(result.messages && result.messages.length > 0 ? { messages: result.messages } : {}),
+          });
+        }
       }
 
       // Build response data. Connector returns SQLResult (rows + rowCount);
