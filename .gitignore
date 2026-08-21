@@ -13,7 +13,7 @@ dist/
 out/
 *.min.js
 *.min.css
-
+database.db
 # Environment & config
 dbhub.toml
 docs/plans/
@@ -89,5 +89,5 @@ $RECYCLE.BIN/
 *.dll
 *.exe
 *.o
-*.so 
+*.so
 /.claude/
