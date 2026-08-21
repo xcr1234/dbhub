@@ -18,9 +18,9 @@
     "README.md"
   ],
   "scripts": {
-    "build": "pnpm run generate:api-types && tsup && cd frontend && pnpm run build",
-    "build:npm": "npm run generate:api-types && tsup && cd frontend && npm run build",
-    "build:backend": "pnpm run generate:api-types && tsup",
+    "build": "pnpm run generate:api-types && cross-env NODE_OPTIONS=--max-old-space-size=8192 tsup && cd frontend && pnpm run build",
+    "build:npm": "npm run generate:api-types && cross-env NODE_OPTIONS=--max-old-space-size=8192 tsup && cd frontend && npm run build",
+    "build:backend": "pnpm run generate:api-types && cross-env NODE_OPTIONS=--max-old-space-size=8192 tsup",
     "build:frontend": "cd frontend && pnpm run build",
     "start": "node dist/index.js",
     "dev": "concurrently --kill-others \"pnpm run dev:backend\" \"pnpm run dev:frontend\"",
@@ -34,7 +34,8 @@
     "test:unit": "vitest run --project unit",
     "test:watch": "vitest",
     "test:integration": "vitest run --project integration",
-    "test:build": "node scripts/smoke-test-build.mjs"
+    "test:build": "node scripts/smoke-test-build.mjs",
+    "publish:all": "npm publish --registry=https://registry.npmjs.org"
   },
   "engines": {
     "node": ">=20"
