@@ -22,6 +22,7 @@ DBHub 是一个零依赖、token 高效的数据库 MCP server，支持 PostgreS
 | SQL 控制台 UI | DSH 原生 UI（不内嵌 DBHub 自带 Workbench） |
 | 连接配置范围 | **直接支持多数据源**（DBHub 原生能力，UI 做源列表 + 增删改） |
 | 通信方案 | 方案 A：真 MCP 客户端，spawn 标准 `dbhub`（stdio MCP），DBHub 零改动 |
+| 主项目改动 | **零改动**：插件不修改 DBHub 任何源码/配置，只消费其构建产物 `dist/index.js` 作为标准 MCP server |
 | 模型工具形态 | **统一工具 + `source_id` 参数**（3 个稳定工具名，内部路由到按源命名的 MCP 工具） |
 
 ## 3. 硬约束
@@ -32,6 +33,8 @@ DSH 动态 Cordis 插件是纯 JavaScript：
 - 因此 DBHub 的 TypeScript 源码及其驱动依赖（`pg`、`mysql2`、`mssql`、`mariadb`、`oracledb`、`sql.js`、`@modelcontextprotocol/sdk`、`ssh2` 等，含原生模块）**不能被插件直接加载**。
 
 推论：DBHub 必须以**独立子进程**运行，插件作为「桥」通过 stdio 与它通信。
+
+**零改动主项目**：插件代码独立于 DBHub 仓库（动态 Cordis 插件，不落盘到 DBHub 内）；对 DBHub 只读地消费其**已构建产物** `dist/index.js`（当前已存在，驱动已装）。实现过程中不得修改 DBHub 的源码、配置或目录结构；必要时仅可执行 `pnpm run build` 之类的构建/安装命令产出构建产物（不属源码改动）。
 
 其他约束：
 
@@ -64,7 +67,7 @@ DSH 动态 Cordis 插件是纯 JavaScript：
 
 ### 5.1 DBHub 进程管理
 
-- 多源必须走 TOML：插件用 `fs` 把当前源列表写成一份 `dbhub.toml`（`[[sources]]`），再 `subprocess.spawn` 启动 `node <dbhub>/dist/index.js --config=<toml 路径>`，stdio 管道分离：
+- 多源必须走 TOML：插件用 `fs` 把当前源列表写成一份 `dbhub.toml`（`[[sources]]`，写到 DSH workspace 的插件私有目录，**不写入 DBHub 仓库**），再 `subprocess.spawn` 启动 `node <dbhub>/dist/index.js --config=<toml 路径>`（`<dbhub>` 为 DBHub 仓库绝对路径，指向其已构建的 `dist/index.js`），stdio 管道分离：
   - **stdout**：MCP JSON-RPC 消息流（逐行）。
   - **stderr**：DBHub 日志（DBHub 全部日志走 `console.error`），单独消费、用于诊断。
 - 保存一个进程句柄；插件 stop / update 时终止进程树（`ctx.effect` 内清理）。
