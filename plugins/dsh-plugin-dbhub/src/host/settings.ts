@@ -34,7 +34,7 @@ import { DbhubRuntime } from './runtime.ts'
 
 /** Default settings value when no user section exists yet. */
 const DEFAULT_CONFIG: DbhubConfig = {
-  port: 8080,
+  port: 18080,
   enabled: true,
   sources: [],
 }
@@ -55,11 +55,21 @@ export type DbhubServiceCommitHook = (view: DbhubView) => void | Promise<void>
 export class DbhubService extends TypertRemoteService {
   private currentConfig: DbhubConfig = DEFAULT_CONFIG
   private readonly runtime = new DbhubRuntime()
-  private readonly configPath: string
 
   constructor(public readonly ctx: Context) {
     super(ctx, 'dbhub')
-    this.configPath = resolveConfigPath()
+  }
+
+  /**
+   * Resolve the live profile directory. dsh-web's loader has the
+   * root `cordis:include` entry whose `config.path` is the profile's
+   * `cordis.yml`; we read it for the authoritative profile dir.
+   * Falls back to env-var / install-path heuristics when the
+   * loader isn't reachable (unit tests, early bootstrap).
+   */
+  private resolveConfigPath(): string {
+    const loader = this.ctx.get('loader')
+    return resolveConfigPath(loader)
   }
 
   /** TYPERT: read the current view. */
@@ -69,7 +79,7 @@ export class DbhubService extends TypertRemoteService {
       config: this.currentConfig,
       running: this.runtime.isRunning(),
       lastError: this.runtime.getLastError(),
-      configPath: this.configPath,
+      configPath: this.resolveConfigPath(),
     }
   }
 
@@ -152,7 +162,7 @@ export class DbhubService extends TypertRemoteService {
 
   private async reconcile(): Promise<void> {
     try {
-      await this.runtime.ensure(this.currentConfig, this.configPath)
+      await this.runtime.ensure(this.currentConfig, this.resolveConfigPath())
     } catch {
       // runtime records the error in its lastError; nothing to do
       // here besides preventing an unhandled rejection.
@@ -163,9 +173,10 @@ export class DbhubService extends TypertRemoteService {
     if (!this.currentConfig.enabled || this.currentConfig.sources.length === 0) {
       return
     }
-    ensureConfigDir()
+    const loader = this.ctx.get('loader')
+    ensureConfigDir(loader)
     const text = configToToml(this.currentConfig)
-    const target = this.configPath
+    const target = this.resolveConfigPath()
     const tmp = `${target}.${randomBytes(6).toString('hex')}.tmp`
     mkdirSync(dirname(target), { recursive: true })
     writeFileSync(tmp, text, 'utf8')

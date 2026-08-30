@@ -37,7 +37,7 @@ export interface DbhubSource {
 
 /** The full settings-namespace document. */
 export interface DbhubConfig {
-  /** HTTP port for the in-process dbhub MCP server. Default: 8080. */
+  /** HTTP port for the in-process dbhub MCP server. Default: 18080. */
   port: number
   /** Whether dbhub is currently running. Toggled by the panel toggle. */
   enabled: boolean
@@ -53,7 +53,7 @@ export interface DbhubConfig {
  * input without round-tripping through schemastery.
  */
 export const dbhubConfigSchema = zSchema.object({
-  port: zSchema.number().default(8080).min(1).max(65535),
+  port: zSchema.number().default(18080).min(1).max(65535),
   enabled: zSchema.boolean().default(true),
   sources: zSchema
     .array(

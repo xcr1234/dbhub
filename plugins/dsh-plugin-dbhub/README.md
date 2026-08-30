@@ -68,7 +68,7 @@ The plugin owns one settings namespace: **`dbhub`**. Schema:
 
 ```ts
 {
-  port: number           // 1-65535, default 8080
+  port: number           // 1-65535, default 18080
   enabled: boolean       // default true
   sources: Array<{
     id: string           // [A-Za-z0-9_-]{1,64}
@@ -78,13 +78,19 @@ The plugin owns one settings namespace: **`dbhub`**. Schema:
 ```
 
 The user document is edited through the settings panel; the same
-shape is what the plugin writes to `<DSH_PROFILE_DIR>/dbhub.toml`.
+shape is what the plugin writes to `<profile>/dbhub.toml`.
 
 ### File layout
 
-The plugin writes to `${DSH_PROFILE_DIR}/dbhub.toml`. `DSH_PROFILE_DIR`
-is set by the dsh launcher; the fallback is `~/.dsh/profile-data/`.
-DBHub is started with `--config=<that file>`, so cwd is irrelevant.
+The plugin writes to `<DSH_PROFILE_DIR>/dbhub.toml` (default:
+`<profile>/dbhub.toml`, e.g. `C:\Users\xcr_1\.dsh\profiles\web\dbhub.toml`
+on Windows). The profile dir is read from the loader's
+`cordis:include` entry's `config.path` (the same source of truth
+`@opendsh/dsh-plugin-setting-mcp` uses for `cordis.patch.yml`),
+so dbhub.toml lands beside cordis.yml in the active profile.
+DBHub is started with `--config=<that file>`, so cwd is
+irrelevant. Override with `DBHUB_TOML_PATH=<full path>` to
+keep the file anywhere else (e.g. a sync'd dotfiles checkout).
 
 ### Advanced options (SSH, SSL, query_timeout, custom tools)
 

@@ -61,7 +61,7 @@ dsh plugin --profile web add @xcr1234/dsh-plugin-dbhub
 
 ```ts
 {
-  port: number           // 1-65535，默认 8080
+  port: number           // 1-65535，默认 18080
   enabled: boolean       // 默认 true
   sources: Array<{
     id: string           // [A-Za-z0-9_-]{1,64}
@@ -71,13 +71,19 @@ dsh plugin --profile web add @xcr1234/dsh-plugin-dbhub
 ```
 
 用户文档通过设置面板编辑；同样的结构会写到
-`<DSH_PROFILE_DIR>/dbhub.toml`。
+`<profile>/dbhub.toml`。
 
 ### 文件位置
 
-插件写到 `${DSH_PROFILE_DIR}/dbhub.toml`。`DSH_PROFILE_DIR` 由 dsh
-launcher 设置；回退到 `~/.dsh/profile-data/`。DBHub 用
-`--config=<该文件>` 启动，cwd 不影响。
+插件写到 `<DSH_PROFILE_DIR>/dbhub.toml`，默认是
+`<profile>/dbhub.toml`（Windows 上是
+`C:\Users\xcr_1\.dsh\profiles\web\dbhub.toml`）。profile 目录从
+loader 的 `cordis:include` 入口的 `config.path` 读取（与
+`@opendsh/dsh-plugin-setting-mcp` 定位 `cordis.patch.yml` 的方式
+一致），所以 dbhub.toml 落在当前 profile 的 cordis.yml 旁边。
+DBHub 用 `--config=<该文件>` 启动，cwd 不影响。
+用 `DBHUB_TOML_PATH=<完整路径>` 可以把文件放到其他位置（例如
+同步的 dotfiles 仓库）。
 
 ### 高级选项（SSH、SSL、query_timeout、自定义工具）
 
