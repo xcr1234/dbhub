@@ -47,6 +47,12 @@ import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
+/** Convert a file URL or plain path string to an absolute path. */
+function toAbsolutePath(value: string): string {
+  if (value.startsWith('file://')) return fileURLToPath(value)
+  return resolve(value)
+}
+
 /** Filename of the generated dbhub config inside the profile dir. */
 const TOML_FILENAME = 'dbhub.toml'
 
@@ -87,10 +93,12 @@ function discoverProfileDirFromInstallPath(start: string, maxDepth = 10): string
 
 /** Sanity-checked path of the root DSH profile's `cordis.yml`. */
 function readProfileDirFromCordisInclude(cordisPath: string): string {
-  // `cordisPath` is the file URL the loader has for `cordis.yml`;
-  // its directory is the profile dir. The loader passes a
-  // `pathToFileURL(...)` URL on every dsh release we have seen.
-  const profileDir = dirname(cordisPath)
+  // `cordisPath` is either a `file://` URL (the loader's standard
+  // representation across every dsh release we have seen) or a
+  // plain absolute path. Convert to a real path before any
+  // filesystem operation.
+  const absolute = toAbsolutePath(cordisPath)
+  const profileDir = dirname(absolute)
   if (!existsSync(join(profileDir, 'cordis.yml'))) {
     throw new Error(
       `dbhub.toml location: ${profileDir} does not look like a DSH profile (cordis.yml missing)`,
