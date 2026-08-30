@@ -1,3 +1,6 @@
+# pnpm 依赖存储
+.pnpm-store/
+
 # Dependencies
 node_modules/
 package-lock.json
