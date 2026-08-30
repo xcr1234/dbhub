@@ -91,8 +91,14 @@ export class DbhubService extends TypertRemoteService {
    */
   @Remote
   async save(input: DbhubConfig): Promise<DbhubView> {
+    console.warn(`[dbhub] save called with ${input.sources.length} source(s), enabled=${String(input.enabled)}, port=${String(input.port)}`)
     for (const s of input.sources) {
-      assertValidDsn(s.dsn, s.id)
+      try {
+        assertValidDsn(s.dsn, s.id)
+      } catch (err) {
+        console.warn(`[dbhub] save: invalid DSN for "${s.id}": ${err instanceof Error ? err.message : String(err)}`)
+        throw err
+      }
     }
     const seen = new Set<string>()
     for (const s of input.sources) {
@@ -105,7 +111,13 @@ export class DbhubService extends TypertRemoteService {
     if (!settings) {
       throw new Error('dbhub settings service is not mounted')
     }
-    await settings.replace(NS, input as unknown as Record<string, unknown>)
+    try {
+      await settings.replace(NS, input as unknown as Record<string, unknown>)
+      console.warn(`[dbhub] save: settings.replace succeeded`)
+    } catch (err) {
+      console.warn(`[dbhub] save: settings.replace failed: ${err instanceof Error ? err.message : String(err)}`)
+      throw err
+    }
     // The watcher fires onChange synchronously inside the settings
     // service; one microtask yield lets currentConfig pick up the new
     // value before we read it.
@@ -170,7 +182,11 @@ export class DbhubService extends TypertRemoteService {
   }
 
   private writeToml(): void {
+    console.warn(
+      `[dbhub] writeToml called: enabled=${String(this.currentConfig.enabled)} sources=${String(this.currentConfig.sources.length)}`,
+    )
     if (!this.currentConfig.enabled || this.currentConfig.sources.length === 0) {
+      console.warn('[dbhub] writeToml: skipped (disabled or empty sources)')
       return
     }
     const loader = this.ctx.get('loader')
@@ -183,10 +199,11 @@ export class DbhubService extends TypertRemoteService {
     try {
       if (existsSync(target)) unlinkSync(target)
       renameSync(tmp, target)
-    } catch {
-      // Swallow: the runtime's lastError already gets set by ensure();
-      // the next write will retry. Leaving a half-written file on disk
-      // is preferable to crashing the panel.
+      console.warn(`[dbhub] writeToml wrote ${target} (${String(text.length)} bytes)`)
+    } catch (err) {
+      console.warn(
+        `[dbhub] writeToml failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 }
