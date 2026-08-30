@@ -2,127 +2,377 @@
 
 English | [中文](README.zh.md)
 
-DSH plugin: **manage DBHub database MCP servers from the settings panel.**
-DBHub is started in-process (no `npx` child process), its `dbhub.toml`
-config is generated from the panel, and its tools are exposed to the
-model through `@deepseek-ai/dsh-mcp-client`. Hot reload is handled by
-DBHub's own `fs.watch` on the TOML file — the plugin just rewrites
-the file on save.
+A DSH web plugin that turns DBHub (a token-efficient database MCP
+server) into a first-class citizen of the settings panel. The plugin
+spawns DBHub as a child `node` process, manages its `dbhub.toml`
+configuration, exposes its registered tools back to the panel, and
+plumbs the MCP endpoint into DSH's `@deepseek-ai/dsh-mcp-client` so
+the model sees the tools automatically.
 
-## What it does
+This document is the **onboarding guide for new contributors**. If
+you only want to install and use the plugin, scroll to the bottom
+for the user-facing quickstart.
 
-- **In-process DBHub** — `startServer({ transport: 'http', port, configPath })`
-  from `@xcr1234/dbhub-fork/server` is invoked directly. No child
-  process, no `npx` dependency on the host PATH.
-- **Settings panel** — adds a "Database connections" entry to the
-  settings list. Edit, add, remove, change port, toggle on/off,
-  then **Save**. The panel calls `dbhub/save` through typert, the
-  host writes `dbhub.toml`, DBHub's watcher picks it up.
-- **Auto-exposed tools** — a single `@deepseek-ai/dsh-mcp-client`
-  row pointing at `http://127.0.0.1:<port>/mcp` is inserted on
-  first successful start, removed on dispose, and rebuilt when the
-  port changes.
-- **Hot reload** — DBHub's own `config-watcher.ts` (500 ms
-  debounce) re-connects sources on every TOML edit, with rollback
-  on failure. The plugin does not need its own reload logic.
+---
 
-## Architecture
-
-A dual-face npm package installed into the `web` profile:
-
-| Half     | Entry                              | Role |
-| -------- | ---------------------------------- | ---- |
-| Server   | `lib/index.js`                     | Cordis plugin: registers `ctx.dbhub` (typert), starts the in-process DBHub, watches the `dbhub` settings namespace, and manages the `dsh-mcp-client` row. |
-| TYPERT   | `lib/typert.js`                    | Host typert face (`dbhub/list`, `dbhub/save`). |
-| Browser  | `client/client.js`                 | `window.__ModuleLoader__.load` factory: mounts the `dbhub` remote, registers the locale dictionaries, injects the React settings page into the `settings.section` slot. |
+## 1. What's actually in this repo
 
 ```
-Settings panel (browser)             Host plugin                    DBHub (in-process)
-─────────────────────────           ────────────────────           ────────────────────
-User edits DSN  ────── dbhub/save ──▶ zod parse ──▶ settings.replace
-                                          │
-                                          ├─▶ writeToml()  ────────▶ fs.watch (500ms)
-                                          │                            │
-                                          └─▶ runtime.ensure()        ├─▶ parse TOML
-                                               │                      ├─▶ reconnect sources
-                                               ▼                      ├─▶ rebuild tool registry
-                                       mcp-client row                 └─▶ register tools
-                                       (http://.../mcp)                     │
-                                                                         model tools
-                                                                         (live)
+plugins/dsh-plugin-dbhub/
+├── package.json              # dual-face npm package; @xcr1234/dsh-plugin-dbhub
+├── cordis.patch.yml          # one loader row: name: '@xcr1234/dsh-plugin-dbhub'
+├── tsconfig.json             # strict ESM, allowImportingTsExtensions
+├── tsup.config.ts            # host bundle (ESM, dts)
+├── scripts/
+│   └── build-client.mjs      # esbuild CJS -> __ModuleLoader__ factory wrapper
+├── src/
+│   ├── index.ts              # host apply() entry
+│   ├── typert.ts             # host TYPERT manifest (dbhub/list, save, listTools)
+│   ├── typert-bridge.ts      # forces deepseek-harness typert-protocol identity
+│   ├── host/
+│   │   ├── settings.ts       # ctx.dbhub service + settings section + onCommit
+│   │   ├── runtime.ts        # dbhub child-process lifecycle + /api/sources probe
+│   │   └── config-file.ts    # profile-dir discovery + dbhub.toml path
+│   ├── client/               # browser half
+│   │   ├── index.ts          # client plugin body (mounts remote + locale + slot)
+│   │   ├── DbhubSettingsSection.tsx   # the settings page (React)
+│   │   ├── typert-remote.ts  # client TYPERT manifest (mirrors typert.ts)
+│   │   ├── locales.ts        # zh + en dictionaries
+│   │   └── styles.ts         # theme-aware CSS (data-plugin-css inject)
+│   └── shared/
+│       ├── types.ts          # zod wire schemas + DbhubConfig/Tool/View types
+│       └── toml.ts           # configToToml / tomlToConfig / inferDbType
+├── tests/
+│   ├── runner.mjs            # entry that delegates to tests/run-tests.ts
+│   ├── run-tests.ts          # node:assert harness (no vitest, no esbuild spawn)
+│   └── toml.test.ts          # round-trip + schema validation
+├── README.md (this file)
+├── README.zh.md              # Chinese mirror
+├── LICENSE                    # MIT
+└── .gitignore                 # excludes lib/, client/client.js, .smoke/
 ```
 
-## Install
+**Build outputs (gitignored, regenerated by `pnpm build`):**
+`lib/index.js`, `lib/typert.js`, `lib/*.d.ts`, `client/client.js`,
+`client/client.js.map`.
+
+---
+
+## 2. How it fits into DSH
+
+DSH loads a plugin as a single `cordis:include` row. The package
+declares `dsh.client` (browser half) and exports a typert manifest
+(host half); the dsh-host plugin inventory and dsh-typert-loader
+pick both up automatically.
+
+```
+                  ┌──────────────────────────────────────────────┐
+                  │  dsh web process (E:\dev\deepseek-harness)  │
+                  │                                              │
+  user panel  ◀──▶│  typert gateway  ──▶ ctx.dbhub.save()       │
+       click       │                     (host service)        │
+                  │           │                              │
+                  │           ▼                              │
+                  │  settings.replace(ns, section)             │
+                  │           │                              │
+                  │           ├─▶ settings/<profile>/...yaml │
+                  │           │                              │
+                  │           ▼ (commit fires watcher)        │
+                  │  onChange → writeToml → runtime.ensure   │
+                  │                  │                       │
+                  │                  ├─▶ <profile>/dbhub.toml │
+                  │                  │                       │
+                  │                  └─▶ spawn dbhub child     │
+                  │                                              │
+                  │  dsh-mcp-client row (url=http://127.0.0.1:  │
+                  │  <port>/mcp)                                │
+                  └────────────────┬─────────────────────────────┘
+                                   │ HTTP
+                                   ▼
+                  ┌──────────────────────────────────────────────┐
+                  │  dbhub child process (node dbhub-fork dist) │
+                  │  fs.watch dbhub.toml (500 ms debounce)       │
+                  │  HTTP /mcp, /api/sources, /api/sources/:id  │
+                  └──────────────────────────────────────────────┘
+```
+
+---
+
+## 3. The data flow, end to end
+
+### 3.1 User edits a connection in the panel
+
+1. `DbhubSettingsSection.tsx` keeps a local `draft` (the candidate
+   config the user is editing).
+2. The user clicks **Save** → `onSave` calls `remote.save(draft)`
+   (TYPERT) → wire → `dbhub/save` host method.
+3. `DbhubService.save` validates DSNs, asserts unique source ids,
+   then `ctx.settings.replace('dbhub', section)`.
+4. Settings commit fires the watcher that
+   `installSettingsSection` registered. `onChange`:
+   - re-reads `ctx.settings.get('dbhub')` to refresh `currentConfig`
+     (settings' `setSource` only fires on attach/detach, **not** on
+     every commit — this is a real footgun)
+   - writes `dbhub.toml` atomically (tmp + rename)
+   - calls `runtime.ensure(config, configPath)`, which compares
+     port + enabled + source-count and starts/stops the child
+   - invokes the host's `onCommit` hook (used by `apply()`) so the
+     `dsh-mcp-client` row is rebuilt if the signature changed
+5. `save()` returns the live `DbhubView`. The panel renders the
+   result. **The panel also schedules a 1.5 s `listTools()` follow-up**
+   because dbhub's `fs.watch` (500 ms) + cold-start reconciliation
+   means the saved view's `tools` field is the *pre-reload* snapshot.
+6. dbhub sees `dbhub.toml` change → parses it → reconnects sources
+   → registers tools.
+
+### 3.2 What the panel shows vs. what the model sees
+
+| Source of truth                       | Read by                                |
+| ------------------------------------- | -------------------------------------- |
+| DSH settings file (`~/.dsh/settings.yaml`) → `dbhub` section | panel `list()` call |
+| `<profile>/dbhub.toml`                | dbhub child process; panel shows the path but does **not** read it |
+| dbhub's `/api/sources` JSON response  | `DbhubService.listTools()` (live tools) |
+| `dsh-mcp-client` loader row           | the model (under `mcp__dbhub__*`)      |
+
+These are three independent files. The panel does not read
+`dbhub.toml` directly; it reads the DSH settings section. dbhub
+reads its TOML. The model never touches either — it sees the
+MCP-exposed tools from `dsh-mcp-client`.
+
+---
+
+## 4. Why the implementation looks the way it does
+
+### 4.1 Child process, not `import('@xcr1234/dbhub-fork')`
+
+We initially tried `import { startServer } from '@xcr1234/dbhub-fork'`
+but the dsh web loader resolves plugin packages by name from the
+profile's `node_modules`. That works for the plugin's own code, but
+it leaves the plugin's runtime dependent on `@xcr1234/dbhub-fork`
+being installable in the same workspace — fragile across upgrades
+and confusing for downstream installers.
+
+`DbhubRuntime` (`src/host/runtime.ts`) instead spawns
+`process.execPath` against `resolveDbhubBin()` (env override
+`DBHUB_BIN`, then `<plugin>/node_modules/@xcr1234/dbhub-fork/...`,
+then a workspace fallback at `E:/dev/dbhub/dist/index.js`). The
+child is killed with SIGTERM (5 s grace, then SIGKILL). Logs are
+prefixed `[dbhub:<port>]`.
+
+### 4.2 `src/typert-bridge.ts` exists for one reason
+
+`@deepseek-ai/dsh-typert-protocol` is a **deepseek-harness monorepo
+internal package**, not on npm in a usable form. The plugin's
+`@Remote()` decorators write marker records into a module-level
+WeakMap inside that package. dsh-web's typert gateway reads the
+same map to discover marked methods.
+
+If the plugin loads its own copy of the package (via pnpm in the
+profile's `node_modules`) and dsh-web uses deepseek-harness's copy,
+the two copies are different module instances and the gateway
+never sees the plugin's markers — symptom: **"Service has no
+visible typertRemote binding"**.
+
+`src/typert-bridge.ts` uses `createRequire(import.meta.url)` to load
+`deepseek-harness/packages/typert/protocol/lib/index.js` directly
+(overridable via `DSH_HARNESS_ROOT`). Both sides now share the
+exact same module instance, so the marker map is shared. **Do not
+"fix" this by switching to a bare `@deepseek-ai/dsh-typert-protocol`
+import** — it will re-introduce the binding error.
+
+### 4.3 Why the TOML write uses `tmp + rename`
+
+Windows `fs.rename` does not overwrite an existing destination.
+We delete the destination first, then rename the temp file into
+place. This produces a single discrete event for dbhub's
+`fs.watch`, instead of an empty-file window in between.
+
+### 4.4 Why sources-only changes do not restart the dbhub child
+
+`DbhubRuntime.ensure` only restarts the child when `port`,
+`enabled`, or `source count` changes. A sources-only edit writes a
+new `dbhub.toml`; dbhub's own watcher (500 ms debounce) reloads
+sources in place with rollback-on-failure. Spawning a new child
+for every save would lose any cached state and waste ~1 s.
+
+### 4.5 Why we expose tools via `dbhub/listTools` instead of re-reading `dbhub.toml`
+
+`dbhub.toml` round-trips only `id` + `dsn`. Anything else (SSH
+tunnel, SSL, custom tools) the user has hand-edited would be lost
+on every save. We ask dbhub itself via `fetch /api/sources` what
+its current live tool inventory is. That endpoint returns the
+flat shape `{ id, tools: [{ name, description, readonly }] }`.
+
+The fetch has a 3 s `AbortController` timeout and silently returns
+`[]` on failure — never throws, because the panel treats empty as
+"no tools yet" (dbhub is starting up), not as an error.
+
+---
+
+## 5. Coding conventions
+
+- **All side effects go through `ctx.effect(...)`** so they are
+  torn down when the plugin fiber unloads. No module-level
+  timers, listeners, or process-level state.
+- **Required services go through `inject` in `index.ts`**, never
+  via direct property access on `ctx`. The plugin currently
+  injects `loader`.
+- **TOML serialization is the only place we write to disk.**
+  Everything else goes through `ctx.settings` (DSH-managed) or
+  `ctx.loader` (DSH-managed).
+- **Client panel never calls dbhub directly** — only the host
+  typert endpoints. If the panel needs a new piece of data, add
+  a `@Remote` method to `DbhubService` and a matching entry in
+  `src/typert.ts` + `src/client/typert-remote.ts`.
+- **All string literal UI copy lives in `src/client/locales.ts`**.
+  Add to both `zh` and `en`; the Chinese dictionary is the key-set
+  source of truth.
+
+---
+
+## 6. Adding a feature: the boring checklist
+
+When you add a new field to the config:
+
+1. `src/shared/types.ts` — add to `DbhubConfig` interface AND to
+   `dbhubConfigZodSchema` (wire) AND to `dbhubConfigSchema`
+   (schemastery, used by settings-file).
+2. `src/client/DbhubSettingsSection.tsx` — add the field to the
+   editor form and the view layout.
+3. `src/client/locales.ts` — add label + hint to both dictionaries.
+4. `src/shared/toml.ts` — only if the field needs to round-trip
+   through `dbhub.toml` (most user-only fields do not).
+5. If the field changes the runtime (e.g. new env var to pass to
+   dbhub), update `DbhubRuntime.ensure` and the `onCommit` signature
+   in `src/index.ts`.
+
+When you add a new typert endpoint:
+
+1. Add a `@Remote()` method on `DbhubService`.
+2. Add the invocation entry in `src/typert.ts` (host).
+3. Add the matching descriptor in `src/client/typert-remote.ts`
+   (client).
+4. Both zod schemas are imported from `src/shared/types.ts` —
+   one source of truth, validated on both sides.
+
+---
+
+## 7. Debugging
+
+### Where the logs go
+
+Everything the plugin logs ends up in **dsh-web's stderr** (i.e.
+the terminal you launched `dsh web` from). Some notable prefixes:
+
+| Prefix                        | Meaning |
+| ----------------------------- | ------- |
+| `[dbhub] save called with ...`| panel triggered save; entry point |
+| `[dbhub] writeToml called ...` | settings commit fired the watcher |
+| `[dbhub] writeToml wrote <path> (<n> bytes)` | file is on disk |
+| `[dbhub] profile dir resolved from cordis:include -> <dir>` | path resolution worked |
+| `[dbhub] no cordis:include in loader; entries seen: ...` | path resolution failed — usually the loader wasn't ready yet, falls back to a default |
+| `[dbhub:18080] ...` | forwarded from the dbhub child process |
+
+### "I saved but the panel didn't update"
+
+The chain is: `save → settings.replace → watcher → onChange →
+writeToml → runtime.ensure`. If any step silently throws, the
+panel will appear to have done nothing.
+
+- **Watcher never fires:** `installSettingsSection.onChange`
+  reads `ctx.settings.get('dbhub')` to refresh `currentConfig`
+  (settings' `setSource` only fires on attach/detach, not on
+  every commit — see §4.5). If you refactored that hook and lost
+  the `settings.get(ns)` refresh, `writeToml` will keep writing
+  the install-time snapshot forever.
+- **dsh.toml path wrong:** check the `cordis:include` entry's
+  `config.path` resolves to a real `cordis.yml`. The
+  `resolveProfileDirFromLoader` function logs the exact decision.
+
+### "The model can't see my dbhub tools"
+
+1. The plugin's `apply()` only inserts a `dsh-mcp-client` row
+   when the signature changes. Look for
+   `mcp-dbhub-<port>` in `dsh-host-plugin-inventory`'s listing
+   (or in the dsh web inventory UI if enabled). The plugin also
+   requires `view.running && view.config.enabled &&
+   view.config.sources.length > 0` — if any of those is false the
+   row is removed on the next reconcile.
+2. dbhub's own `execute_sql` / `search_objects` / `explain_sql`
+   are visible to the panel via `dbhub/listTools`. The model
+   sees them under the **serverName** prefix, e.g.
+   `mcp__dbhub__execute_sql`.
+
+### "dsh web fails to load the plugin at all"
+
+The startup error appears in `dsh web` stderr. Common causes:
+- **`@xcr1234/dbhub-fork` not installed and `DBHUB_BIN` not set.**
+  `DbhubRuntime.resolveDbhubBin()` throws at startInternal time
+  when neither resolves.
+- **`cordis:include` entry's `config.path` is malformed.** dsh
+  will print a loader error. Run `pnpm typecheck` to catch any
+  schema drift first.
+
+---
+
+## 8. User-facing quickstart
 
 ```sh
-dsh plugin --profile web add @xcr1234/dsh-plugin-dbhub
+# In the dbhub monorepo root
+pnpm install
+pnpm run build:backend            # build @xcr1234/dbhub-fork
+pnpm --filter @xcr1234/dsh-plugin-dbhub build
+
+# Wire the plugin into your dsh profile (junction symlink or npm install)
+cd C:\Users\xcr_1\.dsh\profiles\web
+pnpm install E:\dev\dbhub\plugins\dsh-plugin-dbhub
+
+# Add to cordis.patch.yml:
+#   - insert:
+#       - id: dbhub
+#         name: '@xcr1234/dsh-plugin-dbhub'
+
+# Start dsh web and open http://127.0.0.1:3080
+# Settings -> Database connections -> add a source, save.
 ```
 
-The package depends on `@xcr1234/dbhub-fork`; that one ships the
-`/server` subpath the plugin imports. In a monorepo setup both
-live in the same workspace.
-
-## Configuration
-
-The plugin owns one settings namespace: **`dbhub`**. Schema:
+### Configuration
 
 ```ts
+// Settings namespace "dbhub"
 {
-  port: number           // 1-65535, default 18080
-  enabled: boolean       // default true
+  port: number        // 1-65535, default 18080
+  enabled: boolean    // default true
   sources: Array<{
-    id: string           // [A-Za-z0-9_-]{1,64}
-    dsn: string          // postgres://, mysql://, mariadb://, sqlserver://, sqlite://, oracle://
+    id: string        // [A-Za-z0-9_-]{1,64}
+    dsn: string       // postgres://, mysql://, mariadb://, sqlserver://, sqlite://, oracle://
   }>
 }
 ```
 
-The user document is edited through the settings panel; the same
-shape is what the plugin writes to `<profile>/dbhub.toml`.
+`dbhub.toml` lands at `<profile>/dbhub.toml` (e.g.
+`C:\Users\xcr_1\.dsh\profiles\web\dbhub.toml`). Override with
+`DBHUB_TOML_PATH=<full path>` to keep it elsewhere.
 
-### File layout
+Advanced options (SSH, SSL, `query_timeout`, custom tools) are not
+exposed in the panel. Hand-edit `dbhub.toml`; dbhub's own watcher
+reloads on save, and the plugin's `tomlToConfig` round-trip
+preserves any field whose name is not `id` or `dsn` on a
+`[[sources]]` row.
 
-The plugin writes to `<DSH_PROFILE_DIR>/dbhub.toml` (default:
-`<profile>/dbhub.toml`, e.g. `C:\Users\xcr_1\.dsh\profiles\web\dbhub.toml`
-on Windows). The profile dir is read from the loader's
-`cordis:include` entry's `config.path` (the same source of truth
-`@opendsh/dsh-plugin-setting-mcp` uses for `cordis.patch.yml`),
-so dbhub.toml lands beside cordis.yml in the active profile.
-DBHub is started with `--config=<that file>`, so cwd is
-irrelevant. Override with `DBHUB_TOML_PATH=<full path>` to
-keep the file anywhere else (e.g. a sync'd dotfiles checkout).
+---
 
-### Advanced options (SSH, SSL, query_timeout, custom tools)
+## 9. Tests
 
-Not exposed in the panel. Hand-edit the TOML file to add them; the
-panel re-reads the file path on next load and DBHub's watcher picks
-up the new fields automatically. The next panel save will preserve
-any field whose name is not `id` or `dsn` on a `[[sources]]` row —
-the plugin's `tomlToConfig` round-trip keeps `id` + `dsn` only.
+`pnpm test` runs `node tests/runner.mjs`, which delegates to a
+`node:assert` harness (`tests/run-tests.ts`). No vitest, no
+esbuild spawn — we hit EPERM on sandboxed Windows shells, so
+the harness is deliberately minimal. Each test file
+(`tests/*.test.ts`) is self-contained: it inlines its own
+`describe` / `t` / `expect` and prints a summary at
+module-evaluation time.
 
-## Development
-
-```sh
-pnpm install
-pnpm --filter @xcr1234/dsh-plugin-dbhub build
-pnpm --filter @xcr1234/dsh-plugin-dbhub test
-pnpm --filter @xcr1234/dsh-plugin-dbhub typecheck
-```
-
-The build emits:
-- `lib/index.js`, `lib/typert.js`, `lib/*.d.ts` — the host bundle.
-- `client/client.js` — the browser bundle, wrapped in the
-  `window.__ModuleLoader__.load({ id, factory })` call.
-
-## Lifecycle
-
-- Plugin activation → settings registration → first TOML write →
-  in-process DBHub start → `dsh-mcp-client` row inserted.
-- User saves → settings commit → TOML rewrite → DBHub watcher
-  reloads in place. On a port change, the in-process server is
-  torn down and a new one is started; the `dsh-mcp-client` row is
-  rebuilt under a new id (the dsh-mcp-client plugin refuses a new
-  URL for a serverName it already holds).
-- Disposal → the in-process DBHub is killed (SIGTERM-style
-  `process.exit(0)` from a microtask) and the `dsh-mcp-client` row
-  is removed.
+If you find yourself wanting fixtures or async helpers, consider
+whether the test belongs in this repo at all — anything that needs
+to spawn dbhub or hit the network should be an integration test
+in the dbhub project, not here.
