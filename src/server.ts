@@ -48,10 +48,60 @@ v${version}${modeText} - Minimal Database MCP Server
 }
 
 /**
- * Initialize and start the DBHub server
+ * Optional overrides for {@link startServer}. Each field, when provided, takes
+ * precedence over the corresponding CLI / environment / TOML-default value.
+ * Omitted fields keep dbhub's normal resolution order. Programmatic callers
+ * (DSH plugin, embedders) pass an `opts` object instead of mutating argv.
+ */
+export interface StartServerOptions {
+  /** Override the config file path. Equivalent to passing `--config=<path>`. */
+  configPath?: string
+  /** Override the transport type. Equivalent to passing `--transport=<type>`. */
+  transport?: 'stdio' | 'http'
+  /** Override the HTTP port (no-op when `transport === 'stdio'`). */
+  port?: number
+}
+
+/**
+ * Backwards-compatible CLI entry. Reads options from `process.argv` / env
+ * and delegates to {@link startServer}. New embedders should call
+ * `startServer({ ... })` directly instead.
  */
 export async function main(): Promise<void> {
+  return startServer()
+}
+
+/**
+ * Initialize and start the DBHub server.
+ *
+ * `opts` lets an embedder (e.g. a DSH plugin) skip the argv layer and pass
+ * `configPath` / `transport` / `port` directly. Each provided field is
+ * preferred over CLI / env / TOML-default resolution; omitted fields keep
+ * the normal `process.argv` / `process.env` path. Returns when the HTTP
+ * listener accepts connections (or, for stdio, when the transport is bound);
+ * resolveSourceConfigs has loaded the requested source set by that point.
+ */
+export async function startServer(opts: StartServerOptions = {}): Promise<void> {
   try {
+    // Apply programmatic overrides to the process-level resolution inputs.
+    // `parseCommandLineArgs` and `resolveTransport` both read from argv/env,
+    // so we splice our values in there before the resolution pass runs.
+    if (opts.configPath !== undefined) {
+      process.argv.push(`--config=${opts.configPath}`)
+    }
+    if (opts.transport !== undefined) {
+      // Only set when the caller is not already passing one through argv;
+      // explicit caller-argv wins, matching CLI semantics.
+      if (!process.argv.some((arg) => arg.startsWith('--transport='))) {
+        process.argv.push(`--transport=${opts.transport}`)
+      }
+    }
+    if (opts.port !== undefined) {
+      if (!process.argv.some((arg) => arg.startsWith('--port='))) {
+        process.argv.push(`--port=${String(opts.port)}`)
+      }
+    }
+
     // Resolve source configurations from TOML or fallback to single DSN
     const sourceConfigsData = await resolveSourceConfigs();
 

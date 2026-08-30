@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 
-import { main } from "./server.js";
+import { main, startServer } from "./server.js";
 import { loadConnectors } from "./utils/module-loader.js";
+
+// Re-exported so embedders (the DSH plugin) can spin up the server
+// programmatically without spawning a child process.
+export { startServer, type StartServerOptions } from "./server.js";
 
 // Each load function uses a string literal so the bundler can resolve it.
 const connectorModules = [
@@ -19,3 +23,6 @@ loadConnectors(connectorModules)
     console.error("Fatal error:", error);
     process.exit(1);
   });
+
+// Reference to keep the import live across tree-shaking.
+void startServer;

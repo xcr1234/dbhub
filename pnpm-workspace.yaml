@@ -1,6 +1,7 @@
 packages:
   - '.'
   - 'frontend'
+  - 'plugins/*'
 
 allowBuilds:
   cpu-features: set this to true or false
@@ -12,10 +13,19 @@ allowBuilds:
 
 approvedBuilds:
   - better-sqlite3
-ignoredBuiltDependencies:
-  - cpu-features
   - esbuild
+  - cpu-features
+  - oracledb
   - protobufjs
   - ssh2
+  - sqlite3
+ignoredBuiltDependencies:
+  []
 onlyBuiltDependencies:
   - better-sqlite3
+  - esbuild
+  - cpu-features
+  - oracledb
+  - protobufjs
+  - sqlite3
+  - ssh2

@@ -12,6 +12,12 @@
   "bin": {
     "dbhub": "dist/index.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "dist",
     "LICENSE",
@@ -21,6 +27,7 @@
     "build": "pnpm run generate:api-types && cross-env NODE_OPTIONS=--max-old-space-size=8192 tsup && cd frontend && pnpm run build",
     "build:npm": "npm run generate:api-types && cross-env NODE_OPTIONS=--max-old-space-size=8192 tsup && cd frontend && npm run build",
     "build:backend": "pnpm run generate:api-types && cross-env NODE_OPTIONS=--max-old-space-size=8192 tsup",
+    "build:dbhub-plugin": "pnpm --filter @xcr1234/dsh-plugin-dbhub build",
     "build:frontend": "cd frontend && pnpm run build",
     "start": "node dist/index.js",
     "dev": "concurrently --kill-others \"pnpm run dev:backend\" \"pnpm run dev:frontend\"",
@@ -40,6 +47,11 @@
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    ".",
+    "frontend",
+    "plugins/*"
+  ],
   "keywords": [],
   "author": "",
   "license": "MIT",
