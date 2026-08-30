@@ -138,8 +138,32 @@ export class DbhubService extends TypertRemoteService {
     installSettingsSection(this.ctx, NS, dbhubConfigSchema, DEFAULT_CONFIG, {
       setSource: (source) => {
         this.currentConfig = source()
+        console.warn(
+          `[dbhub] setSource fired: enabled=${String(this.currentConfig.enabled)} sources=${String(this.currentConfig.sources.length)}`,
+        )
       },
       onChange: () => {
+        // `installSettingsSection` calls `onChange` after every
+        // commit but does not pass the new value. Re-read the
+        // current resolved section via the settings service so
+        // `currentConfig` reflects what the user just saved; without
+        // this refresh `writeToml()` would write the value at
+        // install time forever and every subsequent save would be a
+        // no-op on disk.
+        const settings = this.ctx.get('settings')
+        if (settings !== undefined) {
+          try {
+            const next = settings.get(NS) as DbhubConfig | undefined
+            if (next !== undefined) {
+              this.currentConfig = next
+            }
+          } catch {
+            // schema invalid; skip the refresh and let writeToml's
+            // existing values stand (they will be replaced on the
+            // next valid commit).
+          }
+        }
+        console.warn(`[dbhub] onChange fired: enabled=${String(this.currentConfig.enabled)} sources=${String(this.currentConfig.sources.length)}`)
         this.writeToml()
         void this.reconcile().then(() => {
           opts.onCommit?.(this.list())

@@ -145,8 +145,12 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
     setSaving(true)
     setSaveError(null)
     setSaved(false)
+    // eslint-disable-next-line no-console
+    console.warn(`[dbhub-panel] save click: sources=${String(draft.sources.length)} port=${String(draft.port)}`)
     const result = await remote.save(draft)
     setSaving(false)
+    // eslint-disable-next-line no-console
+    console.warn(`[dbhub-panel] save result: ${result.ok ? 'ok' : 'error: ' + result.error.message}`)
     if (result.ok) {
       setView(result.value)
       setDraft(result.value.config)

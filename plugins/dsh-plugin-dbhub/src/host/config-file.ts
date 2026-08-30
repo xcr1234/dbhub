@@ -128,11 +128,13 @@ export function resolveProfileDirFromLoader(loader: unknown): string | null {
       options?: { name?: unknown; config?: unknown }
       subtree?: unknown
     }
-    const name = e.options?.name
+    const options = e.options
+    if (options === undefined) continue
+    const name = options.name
     if (typeof name === 'string') seenNames.push(name)
     if (name !== 'cordis:include') continue
-    const config = e.options.config as { path?: unknown } | undefined
-    if (typeof config?.path !== 'string') {
+    const config = options.config as { path?: unknown } | undefined
+    if (config === undefined || typeof config.path !== 'string') {
       console.warn(
         `[dbhub] loader has cordis:include but no usable config.path; saw entries: ${seenNames.join(', ')}`,
       )
