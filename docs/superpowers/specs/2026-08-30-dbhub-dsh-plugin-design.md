@@ -39,7 +39,7 @@ DSH 动态 Cordis 插件是纯 JavaScript：
 其他约束：
 
 - 动态插件是**进程内临时**的：不跨 DSH 进程重启；`settings` 命名空间注册随插件 fiber 移除。
-- Host 没有 `fetch` 内置（Builtins 仅 `ctx/harness/console/btoa/atob/TextEncoder/TextDecoder`），出站 HTTP 不可用——确认走 stdio 管道。
+- Host 无全局 `fetch` 内置（Builtins 仅 `ctx/harness/console/btoa/atob/TextEncoder/TextDecoder`）；出站 HTTP 需经 `web` 服务（`ctx.web.fetch`，取决于已注册 fetch provider），非裸 `fetch` 全局——本设计仍确认走 stdio 管道。
 - DSH 无现成 MCP 客户端服务，需在插件内实现 MCP 客户端协议。
 - 多源下 DBHub 按源命名工具（`execute_sql_<id>`），无统一 `source_id` 参数；统一工具名 + `source_id` 由插件这一层补齐。
 
