@@ -111,17 +111,38 @@ export function resolveProfileDirFromLoader(loader: unknown): string | null {
   // entry exposes `options` and an optional `subtree` handle.
   const entriesFn = (loader as { entries?: () => Iterable<unknown> }).entries
   if (typeof entriesFn !== 'function') return null
+  // Debug breadcrumbs: surface what the loader actually sees so
+  // a stale cordis:include entry or a misconfigured loader is
+  // diagnosable in the dsh log without rebuilding.
+  const seenNames: string[] = []
   for (const entry of entriesFn.call(loader)) {
-    const e = entry as { options?: { name?: unknown; config?: unknown }; subtree?: unknown }
-    if (e.options?.name !== 'cordis:include') continue
+    const e = entry as {
+      options?: { name?: unknown; config?: unknown }
+      subtree?: unknown
+    }
+    const name = e.options?.name
+    if (typeof name === 'string') seenNames.push(name)
+    if (name !== 'cordis:include') continue
     const config = e.options.config as { path?: unknown } | undefined
-    if (typeof config?.path !== 'string') continue
+    if (typeof config?.path !== 'string') {
+      console.warn(
+        `[dbhub] loader has cordis:include but no usable config.path; saw entries: ${seenNames.join(', ')}`,
+      )
+      continue
+    }
     try {
-      return readProfileDirFromCordisInclude(config.path)
-    } catch {
-      // Bad path; fall through.
+      const dir = readProfileDirFromCordisInclude(config.path)
+      console.warn(`[dbhub] profile dir resolved from cordis:include -> ${dir}`)
+      return dir
+    } catch (err) {
+      console.warn(
+        `[dbhub] cordis:include path rejected: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
+  console.warn(
+    `[dbhub] no cordis:include in loader; entries seen: ${seenNames.join(', ')}; falling back`,
+  )
   return null
 }
 
