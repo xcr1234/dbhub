@@ -3,19 +3,27 @@
  * reference `@opendsh/dsh-plugin-setting-mcp` plugin's hand-written
  * manifest shape (so the same `dsh-typert-loader` row scan picks it up).
  *
- * Three endpoints:
- *  - `dbhub/list`  — current settings value + runtime phase.
- *  - `dbhub/save`  — replace the settings section, atomically rewriting
- *                    dbhub.toml. Returns the new view.
+ * Endpoints:
+ *  - `dbhub/list`       — current settings view + runtime phase +
+ *                         live tool inventory from dbhub's HTTP API.
+ *  - `dbhub/listTools`  — fast tool-only fetch (used by the panel
+ *                         after a `dbhub/save` round-trip).
+ *  - `dbhub/save`       — replace the settings section, atomically
+ *                         rewriting dbhub.toml. Returns the new view.
  *
- * The zod schemas are imported from `../shared/types.ts`, so the client
- * half and this host face validate with the exact same codecs.
+ * The zod schemas are imported from `../shared/types.ts`, so the
+ * client half and this host face validate with the exact same
+ * codecs.
  *
  * @module @xcr1234/dsh-plugin-dbhub
  */
 
 import { z } from 'zod'
-import { dbhubSaveInputSchema, dbhubViewSchema } from './shared/types.ts'
+import {
+  dbhubSaveInputSchema,
+  dbhubToolListSchema,
+  dbhubViewSchema,
+} from './shared/types.ts'
 
 const PKG = '@xcr1234/dsh-plugin-dbhub'
 const direct = { kind: 'direct' as const }
@@ -38,7 +46,12 @@ export const TYPERT = {
         key: 'dbhub',
         exportName: 'dbhub',
         members: [
-          { name: 'list', kind: 'method' as const, signature: '(): DbhubView' },
+          { name: 'list', kind: 'method' as const, signature: '(): Promise<DbhubView>' },
+          {
+            name: 'listTools',
+            kind: 'method' as const,
+            signature: '(): Promise<DbhubTool[]>',
+          },
           {
             name: 'save',
             kind: 'method' as const,
@@ -57,9 +70,14 @@ export const TYPERT = {
               'export interface DbhubConfig { port: number; enabled: boolean; sources: DbhubSource[] }',
           },
           {
+            name: 'DbhubTool',
+            declaration:
+              'export interface DbhubTool { sourceId: string; name: string; description: string | null; readonly: boolean }',
+          },
+          {
             name: 'DbhubView',
             declaration:
-              'export interface DbhubView { config: DbhubConfig; running: boolean; lastError: string | null; configPath: string }',
+              'export interface DbhubView { config: DbhubConfig; running: boolean; lastError: string | null; configPath: string; tools: DbhubTool[] }',
           },
         ],
       },
@@ -76,6 +94,15 @@ export const TYPERT = {
       invocation: direct,
       parameters: [],
       result: result('DbhubView', dbhubViewSchema),
+    },
+    {
+      id: `${PKG}#dbhub/listTools`,
+      service: 'dbhub',
+      namespace: 'dbhub',
+      method: 'listTools',
+      invocation: direct,
+      parameters: [],
+      result: result('DbhubTool[]', dbhubToolListSchema),
     },
     {
       id: `${PKG}#dbhub/save`,

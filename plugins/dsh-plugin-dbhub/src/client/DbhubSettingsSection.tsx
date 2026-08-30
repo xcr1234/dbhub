@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { inferDbType, type DbhubConfig, type DbhubSource, type DbhubView } from '../shared/types.ts'
+import { inferDbType, type DbhubConfig, type DbhubSource, type DbhubTool, type DbhubView } from '../shared/types.ts'
 import { C } from './styles.ts'
 
 /** Locale namespace owned by this plugin; matches `client/index.ts`. */
@@ -14,6 +14,7 @@ type T = (key: keyof typeof import('./locales.ts').zh, vars?: Record<string, str
 
 export interface DbhubRemote {
   list(): Promise<{ ok: true; value: DbhubView } | { ok: false; error: Error }>
+  listTools(): Promise<{ ok: true; value: DbhubTool[] } | { ok: false; error: Error }>
   save(
     input: DbhubConfig,
   ): Promise<{ ok: true; value: DbhubView } | { ok: false; error: Error }>
@@ -156,6 +157,19 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
       setDraft(result.value.config)
       setSaved(true)
       window.setTimeout(() => setSaved(false), 2000)
+      // dbhub's fs.watch has a 500 ms debounce before it begins a
+      // reload, and the host runtime's reconcile + child spawn can
+      // add another second on a cold restart. Pull the tool
+      // inventory again after a short delay so the panel reflects
+      // the freshly registered set rather than the pre-reload
+      // snapshot the `save` response carried.
+      window.setTimeout(() => {
+        void remote.listTools().then((toolsResult) => {
+          if (toolsResult.ok) {
+            setView((prev) => (prev === null ? prev : { ...prev, tools: toolsResult.value }))
+          }
+        })
+      }, 1500)
     } else {
       setSaveError(t('error.save', { message: result.error.message }))
     }
@@ -272,27 +286,46 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
             <div>{t('list.emptyHint')}</div>
           </div>
         ) : (
-          draft.sources.map((source) => (
-            <div className={C.row} key={source.id}>
-              <div className={C.rowMain}>
-                <div className={C.name}>{source.id}</div>
-                <div className={C.meta}>
-                  {(() => {
-                    const type = inferTypeLabel(source.dsn)
-                    return type.length > 0 ? `${type} · ${redactDsn(source.dsn)}` : redactDsn(source.dsn)
-                  })()}
+          draft.sources.map((source) => {
+            const sourceTools = (view?.tools ?? []).filter(
+              (tool) => tool.sourceId === source.id,
+            )
+            return (
+              <div className={C.row} key={source.id}>
+                <div className={C.rowMain}>
+                  <div className={C.name}>{source.id}</div>
+                  <div className={C.meta}>
+                    {(() => {
+                      const type = inferTypeLabel(source.dsn)
+                      return type.length > 0 ? `${type} · ${redactDsn(source.dsn)}` : redactDsn(source.dsn)
+                    })()}
+                  </div>
+                  {sourceTools.length > 0 ? (
+                    <div className={C.toolsRow}>
+                      {sourceTools.map((tool) => (
+                        <span
+                          className={`${C.toolChip} ${tool.readonly ? C.toolChipReadonly : ''}`}
+                          key={`${tool.sourceId}.${tool.name}`}
+                          title={tool.description ?? tool.name}
+                        >
+                          {tool.name}
+                          {tool.readonly ? <span className={C.toolChipSource}>· {t('tool.readonly')}</span> : null}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className={C.rowActions}>
+                  <button className={C.btn} onClick={() => onEdit(source)} disabled={saving}>
+                    {t('action.edit')}
+                  </button>
+                  <button className={`${C.btn} ${C.btnDanger}`} onClick={() => onRemove(source)} disabled={saving}>
+                    {t('action.remove')}
+                  </button>
                 </div>
               </div>
-              <div className={C.rowActions}>
-                <button className={C.btn} onClick={() => onEdit(source)} disabled={saving}>
-                  {t('action.edit')}
-                </button>
-                <button className={`${C.btn} ${C.btnDanger}`} onClick={() => onRemove(source)} disabled={saving}>
-                  {t('action.remove')}
-                </button>
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
         <div className={C.rowActions}>
           <button className={`${C.btn} ${C.btnPrimary}`} onClick={onAdd} disabled={saving || editing !== null}>
@@ -342,6 +375,40 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
           </div>
         </div>
       ) : null}
+
+      <div className={C.card}>
+        <div className={C.cardHead}>
+          <div className={C.cardTitle}>{t('tools.title')}</div>
+          {view.running && (view.tools ?? []).length > 0 ? (
+            <span className={`${C.badge} ${C.badgeInfo}`}>
+              {String((view.tools ?? []).length)}
+            </span>
+          ) : null}
+        </div>
+        {view.running ? (
+          (view.tools ?? []).length > 0 ? (
+            <div className={C.toolsRow}>
+              {(view.tools ?? []).map((tool) => (
+                <span
+                  className={`${C.toolChip} ${tool.readonly ? C.toolChipReadonly : ''}`}
+                  key={`${tool.sourceId}.${tool.name}`}
+                  title={
+                    (tool.description ?? tool.name) +
+                    (tool.sourceId.length > 0 ? `\nsource: ${tool.sourceId}` : '')
+                  }
+                >
+                  {tool.sourceId}.{tool.name}
+                  {tool.readonly ? <span className={C.toolChipSource}>· {t('tool.readonly')}</span> : null}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className={C.toolsEmpty}>{t('tools.refreshing')}</div>
+          )
+        ) : (
+          <div className={C.toolsEmpty}>{t('tools.empty')}</div>
+        )}
+      </div>
 
       <div className={C.toml}>
         <div>{t('toml.path')}</div>

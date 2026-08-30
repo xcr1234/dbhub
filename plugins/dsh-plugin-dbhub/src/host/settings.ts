@@ -27,7 +27,7 @@ import { type Context } from '@deepseek-ai/cordis'
 // WeakMap to be visible to the typert gateway.
 import { Remote, TypertRemoteService } from '../typert-bridge.js'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
-import { dbhubConfigSchema, type DbhubConfig, type DbhubView } from '../shared/types.ts'
+import { dbhubConfigSchema, type DbhubConfig, type DbhubTool, type DbhubView } from '../shared/types.ts'
 import { assertValidDsn, configToToml } from '../shared/toml.ts'
 import { ensureConfigDir, resolveConfigPath } from './config-file.ts'
 import { DbhubRuntime } from './runtime.ts'
@@ -74,13 +74,20 @@ export class DbhubService extends TypertRemoteService {
 
   /** TYPERT: read the current view. */
   @Remote
-  list(): DbhubView {
+  async list(): Promise<DbhubView> {
     return {
       config: this.currentConfig,
       running: this.runtime.isRunning(),
       lastError: this.runtime.getLastError(),
       configPath: this.resolveConfigPath(),
+      tools: await this.runtime.listTools(),
     }
+  }
+
+  /** TYPERT: read just the live tool inventory (faster than full list). */
+  @Remote
+  async listTools(): Promise<DbhubTool[]> {
+    return this.runtime.listTools()
   }
 
   /**
@@ -165,8 +172,8 @@ export class DbhubService extends TypertRemoteService {
         }
         console.warn(`[dbhub] onChange fired: enabled=${String(this.currentConfig.enabled)} sources=${String(this.currentConfig.sources.length)}`)
         this.writeToml()
-        void this.reconcile().then(() => {
-          opts.onCommit?.(this.list())
+        void this.reconcile().then(async () => {
+          opts.onCommit?.(await this.list())
         })
       },
     })
@@ -182,8 +189,8 @@ export class DbhubService extends TypertRemoteService {
     // enabled+has-sources and the install path's call did not
     // successfully start.
     if (this.currentConfig.enabled && this.currentConfig.sources.length > 0) {
-      void this.reconcile().then(() => {
-        opts.onCommit?.(this.list())
+      void this.reconcile().then(async () => {
+        opts.onCommit?.(await this.list())
       })
     }
   }
@@ -192,7 +199,7 @@ export class DbhubService extends TypertRemoteService {
    * Read the live config so callers (the apply() row) can insert the
    * mcp-client entry with the right URL. Re-snapshotted every call.
    */
-  public snapshot(): DbhubView {
+  public snapshot(): Promise<DbhubView> {
     return this.list()
   }
 

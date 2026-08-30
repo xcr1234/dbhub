@@ -50,6 +50,10 @@ export const zh = {
   'toml.path': 'dbhub.toml 路径',
   'toml.edit': '直接编辑 TOML',
   'toml.hint': 'SSH 隧道、SSL、查询超时等高级选项不暴露在面板中，可以直接编辑该文件。',
+  'tools.title': '已注册工具',
+  'tools.empty': 'dbhub 进程未启动，暂无工具。保存启用且有连接的设置后，工具列表会自动更新。',
+  'tools.refreshing': '工具列表刷新中…',
+  'tool.readonly': '只读',
 }
 
 /** English dictionary, checked complete against the zh key set. */
@@ -94,4 +98,8 @@ export const en: typeof zh = {
   'toml.path': 'dbhub.toml path',
   'toml.edit': 'Edit TOML directly',
   'toml.hint': 'SSH tunnels, SSL, query timeouts and similar advanced options are not exposed here; edit the file directly to add them.',
+  'tools.title': 'Registered tools',
+  'tools.empty': 'DBHub is not running, no tools registered yet. Save an enabled, connected configuration and the list refreshes automatically.',
+  'tools.refreshing': 'Refreshing tool list...',
+  'tool.readonly': 'read-only',
 }

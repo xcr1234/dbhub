@@ -89,13 +89,38 @@ export interface DbhubView {
   lastError: string | null
   /** Absolute path of the emitted dbhub.toml (under the profile's base dir). */
   configPath: string
+  /** Live tool inventory fetched from dbhub's `/api/sources`. Empty when dbhub is not running. */
+  tools: DbhubTool[]
 }
+
+/** One tool exposed by dbhub for one source. */
+export interface DbhubTool {
+  /** Source id this tool belongs to. */
+  sourceId: string
+  /** Tool name (e.g. "execute_sql", "search_objects"). */
+  name: string
+  /** Tool description as returned by dbhub. */
+  description: string | null
+  /** True when the tool is marked readonly in dbhub.toml. */
+  readonly: boolean
+}
+
+export const dbhubToolSchema = z.object({
+  sourceId: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  readonly: z.boolean(),
+})
+
+/** The `dbhub/listTools` view. Empty array when dbhub is not running. */
+export const dbhubToolListSchema = z.array(dbhubToolSchema)
 
 export const dbhubViewSchema = z.object({
   config: dbhubConfigZodSchema,
   running: z.boolean(),
   lastError: z.string().nullable(),
   configPath: z.string(),
+  tools: dbhubToolListSchema,
 })
 
 /** DSN prefix → connector type. Mirrors dbhub's getDatabaseTypeFromDSN. */

@@ -30,7 +30,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { DbhubConfig } from '../shared/types.ts'
+import type { DbhubConfig, DbhubTool } from '../shared/types.ts'
 
 /** Options the host passes to dbhub via argv. */
 export interface StartServerOptions {
@@ -111,6 +111,55 @@ export class DbhubRuntime {
 
   isRunning(): boolean {
     return this.active !== null
+  }
+
+  /** Current bound port, or null when dbhub is not running. */
+  currentPort(): number | null {
+    return this.active?.port ?? null
+  }
+
+  /**
+   * Fetch the live tool inventory from dbhub's HTTP API and flatten
+   * it into the panel's `(sourceId, name, description, readonly)`
+   * shape. Returns an empty array when dbhub is not running or
+   * the `/api/sources` request fails — the panel treats empty as
+   * "no tools yet", not as an error.
+   */
+  async listTools(): Promise<DbhubTool[]> {
+    const port = this.active?.port
+    if (port === undefined) return []
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3_000)
+    try {
+      const res = await fetch(`http://127.0.0.1:${String(port)}/api/sources`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      })
+      if (!res.ok) return []
+      const payload = (await res.json()) as Array<{
+        id: string
+        tools?: Array<{ name?: string; description?: string; readonly?: boolean }>
+      }>
+      const out: DbhubTool[] = []
+      for (const src of payload) {
+        for (const tool of src.tools ?? []) {
+          if (typeof tool.name !== 'string' || tool.name.length === 0) continue
+          out.push({
+            sourceId: src.id,
+            name: tool.name,
+            description: typeof tool.description === 'string' ? tool.description : null,
+            readonly: tool.readonly === true,
+          })
+        }
+      }
+      return out
+    } catch {
+      // dbhub just restarted, /api/sources 5xx, fetch aborted —
+      // all the same outcome: try again on the next refresh.
+      return []
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   /**

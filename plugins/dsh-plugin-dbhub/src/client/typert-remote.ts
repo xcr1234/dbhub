@@ -8,7 +8,11 @@
  */
 
 import { z } from 'zod'
-import { dbhubSaveInputSchema, dbhubViewSchema } from '../shared/types.ts'
+import {
+  dbhubSaveInputSchema,
+  dbhubToolListSchema,
+  dbhubViewSchema,
+} from '../shared/types.ts'
 
 const PKG = '@xcr1234/dsh-plugin-dbhub'
 const direct = { kind: 'direct' as const }
@@ -31,6 +35,15 @@ export const TYPERT_REMOTE = {
       invocation: direct,
       parameters: [],
       result: result('DbhubView', dbhubViewSchema),
+    },
+    {
+      id: `${PKG}#dbhub/listTools`,
+      service: 'dbhub',
+      namespace: 'dbhub',
+      method: 'listTools',
+      invocation: direct,
+      parameters: [],
+      result: result('DbhubTool[]', dbhubToolListSchema),
     },
     {
       id: `${PKG}#dbhub/save`,
