@@ -19,7 +19,7 @@ DBHub 是一个零依赖、token 高效的数据库 MCP server，支持 PostgreS
 | 决策点 | 结论 |
 |--------|------|
 | MCP 范围 | 窄范围：DBHub 作为 DSH 的数据库工具，不做通用 MCP 客户端 |
-| SQL 控制台 UI | DSH 原生 UI（不内嵌 DBHub 自带 Workbench） |
+| SQL 控制台 UI | DSH 原生 UI（**重写**，不 iframe 内嵌 DBHub 自带 Workbench；复用其结果解析逻辑与表单字段设计作参照，编辑器用纯 `textarea`，不用 CodeMirror） |
 | 连接配置范围 | **直接支持多数据源**（DBHub 原生能力，UI 做源列表 + 增删改） |
 | 通信方案 | 方案 A：真 MCP 客户端，spawn 标准 `dbhub`（stdio MCP），DBHub 零改动 |
 | 主项目改动 | **零改动**：插件不修改 DBHub 任何源码/配置，只消费其构建产物 `dist/index.js` 作为标准 MCP server |
@@ -81,7 +81,7 @@ DSH 动态 Cordis 插件是纯 JavaScript：
 - 行分隔 JSON-RPC 2.0：每条请求写一行（JSON + `\n`）到子进程 stdin；从 stdout 按行读，按 `id` 关联响应。
 - 握手：`initialize` → 读 `protocolVersion` / `capabilities` / `serverInfo` / `instructions` → `notifications/initialized`。
 - `tools/list` → 取按源命名的工具（`execute_sql_<id>` 等）的 `name` / `description` / `inputSchema`。
-- `tools/call` → 执行工具，解析 `result.content`（text 与/或 structuredContent），抽成普通 JSON。
+- `tools/call` → 执行工具，解析 `result.content[0].text`：其文本是一段 JSON `{success, data}`（已从 DBHub Workbench 的 `executeTool` 确认），抽成普通 JSON；再按工具归一化为 `{columns, rows, rowCount}`（execute_sql）或 `{count, results}`（search_objects）。
 - 请求级超时；单请求失败 reject 并重置行缓冲，不影响后续请求。
 
 ### 5.3 模型工具（统一名 + source_id）
@@ -121,7 +121,7 @@ DSH 动态 Cordis 插件是纯 JavaScript：
 - 注册 `settings.section`，`id: "dbhub"`，`label: "数据库"`。
 - 页面三段：
   1. **数据源**：源列表（每行 = 类型图标 + id + default 徽标 + 连接状态），「新增 / 编辑 / 删除 / 设为默认 / 测试连接」。编辑态显示表单：类型下拉、id、description、host/port/database/user、password（已存则掩码占位）、sslmode 下拉、只读开关；高级字段折叠。表单按 `type` 自适应（SQLite 只显示文件路径）。
-  2. **SQL 工作台**：源下拉 + `textarea` 编辑器 + 「运行」+ 结果 `table`。
+  2. **SQL 工作台**：源下拉 + 纯 `textarea` 编辑器（无 CodeMirror，满足「简单执行」）+ 「运行」+ 结果 `table`。结果归一化（`{columns,rows,rowCount}`）在 Host 的 MCP 客户端完成，Client 只渲染。
   3. **表结构**：源下拉 + 对象类型（schema/table/column/procedure/function/index）+ 搜索框 + 详情级别（names/summary/full）+ 结构树/表。
 - 顶部状态条：子进程 / 连接状态（运行中 / 未连接 / 错误信息）。
 - 全部用 `React.createElement`（无 JSX）；数据只取叶子字段，不回显完整 props。
@@ -167,7 +167,7 @@ DSH 动态 Cordis 插件是纯 JavaScript：
 - `settings.register` 需要的 schema（schemastery/zod）在动态插件（无 `z` Builtin）里如何构造；若不可行则用 `fs` 写 JSON 配置 + `credentials` 存密码的回退方案。
 - `credentials` 服务存「按源密码」用 CredentialRef 还是 CredentialKey 的确切写法（`set`/`unset` vs `modifyRecord`）。
 - `harness.registerTool` 的 `ToolDefinition` 结构（用 `Tool.listTools` 参考现有工具）。
-- DBHub 工具结果 content 形态（`createToolSuccessResponse` 的 structuredContent），用于结果解析。
+- DBHub 工具结果 content 形态：`content[0].text` 为 JSON `{success, data}`（execute_sql → `data.rows/count/source_id`；search_objects → `data.object_type/count/results/truncated`），用于结果解析与归一化（参照 `frontend/src/api/tools.ts` 的 `executeTool`）。
 
 ## 13. 范围外（明确不做）
 
