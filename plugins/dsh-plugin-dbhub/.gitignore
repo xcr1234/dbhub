@@ -1,0 +1,9 @@
+# Build artefacts — consumers run `pnpm build` to materialise.
+lib/
+client/client.js
+client/client.js.map
+client/client.tmp.cjs
+client/client.tmp.cjs.map
+# Test scratch space
+.smoke/
+out.txt

@@ -1,0 +1,11 @@
+# Bundle patch for @xcr1234/dsh-plugin-dbhub. Mounts the host half as a
+# single Cordis loader row; the same row is also the browser roster row
+# because the package declares `dsh.client`. The Client half is discovered
+# from this entry by the client-modules node half. Apply after dsh-base +
+# dsh-web-app (which provide `loader`, the settings shell, the web sockets,
+# the typert host and the client typert mount); the plugin's `inject`
+# resolves against those.
+
+- insert:
+    - id: dbhub
+      name: '@xcr1234/dsh-plugin-dbhub'
