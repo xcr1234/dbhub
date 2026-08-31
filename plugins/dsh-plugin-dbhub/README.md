@@ -1,7 +1,5 @@
 # @xcr1234/dsh-plugin-dbhub
 
-[English](README.md) | 中文
-
 DSH web 插件：把 DBHub（一个 token 高效的数据库 MCP 服务器）变成设置面板的一等公民。插件以子进程方式启动 DBHub，管理它的 `dbhub.toml`，把已注册的工具回写到面板，并通过 `@deepseek-ai/dsh-mcp-client` 把 MCP 端点接到 DSH，让模型自动看到工具。
 
 本文档是**新贡献者的上手指南**。如果只想安装使用，滚到底部看用户向快速开始。
