@@ -4,12 +4,12 @@ packages:
   - 'plugins/*'
 
 allowBuilds:
-  cpu-features: set this to true or false
-  esbuild: set this to true or false
-  oracledb: set this to true or false
-  protobufjs: set this to true or false
-  sqlite3: set this to true or false
-  ssh2: set this to true or false
+  cpu-features: true
+  esbuild: true
+  oracledb: true
+  protobufjs: true
+  sqlite3: true
+  ssh2: true
 
 approvedBuilds:
   - better-sqlite3
@@ -19,8 +19,7 @@ approvedBuilds:
   - protobufjs
   - ssh2
   - sqlite3
-ignoredBuiltDependencies:
-  []
+ignoredBuiltDependencies: []
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild
