@@ -126,11 +126,24 @@ export async function apply(ctx: Context): Promise<void> {
     }, 'dbhub.mcp-client.disposer')
 
     const onCommit: DbhubServiceCommitHook = async (view) => {
+      // The signature must change whenever the *tool set* changes. Tools
+      // are keyed by source id (`mcp__dbhub__<id>__*`), so we include
+      // the sorted id list — not just a has-sources boolean. Otherwise
+      // removing one source while keeping others (e.g. drop oracle,
+      // keep sqlite) leaves the mcp-client row pinned to its old
+      // session with the stale tool list, and the AI keeps seeing
+      // tools that no longer exist.
+      //
+      // Source ids are constrained to `[A-Za-z0-9_-]{1,64}` per
+      // `dbhubConfigSchema` in `shared/types.ts`, so `:` is a safe
+      // separator that can't appear inside an id.
       const signature = [
         view.running ? '1' : '0',
         view.config.enabled ? '1' : '0',
-        view.config.sources.length > 0 ? '1' : '0',
         String(view.config.port),
+        ...view.config.sources
+          .map((s) => s.id)
+          .sort(),
       ].join(':')
       if (signature === lastSignature) return
       lastSignature = signature
