@@ -1,6 +1,6 @@
 {
   "name": "@xcr1234/dsh-plugin-dbhub",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "DSH plugin: manage dbhub database MCP servers from the settings panel; starts dbhub in-process (no npx) and exposes its tools via dsh-mcp-client.",
   "type": "module",
   "license": "MIT",
