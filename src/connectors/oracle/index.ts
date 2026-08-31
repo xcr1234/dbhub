@@ -436,27 +436,36 @@ export class OracleConnector implements Connector {
         execOptions.timeout = this.queryTimeoutMs; // Requires oracledb 6.x+ or specific OCI config
       }
 
-      let processedSQL = sql;
-      if (options.maxRows) {
-        // Handle max rows appending FETCH FIRST n ROWS ONLY (Oracle 12c+)
-        // Assuming SQLRowLimiter supports 'oracle' dialect or we handle it here
-        const statements = splitSQLStatements(sql, "oracle");
+      // Oracle's `conn.execute()` only accepts a single statement; the
+      // presence of a `;` anywhere other than the end triggers
+      // ORA-03405. Multi-statement scripts must be wrapped in an
+      // anonymous PL/SQL block (`BEGIN ... COMMIT; END;`).
+      //
+      // We split the input unconditionally — `splitSQLStatements` is a
+      // no-op for a single statement — and wrap whenever the result has
+      // more than one element. The previous version only did this when
+      // `options.maxRows` was set, which left plain `INSERT; INSERT;
+COMMIT;` scripts broken.
+      const statements = splitSQLStatements(sql, "oracle");
+      const isMultiStatement = statements.length > 1;
 
-        const processedStatements = statements.map(statement => {
-          // A basic fallback if SQLRowLimiter doesn't support Oracle syntax yet:
-          if (statement.trim().toUpperCase().startsWith('SELECT') && !statement.toUpperCase().includes('FETCH FIRST')) {
-            return `${statement} FETCH FIRST ${options.maxRows} ROWS ONLY`;
-          }
-          return SQLRowLimiter.applyMaxRows(statement, options.maxRows);
-        });
+      // `FETCH FIRST n ROWS ONLY` (Oracle 12c+) is a SELECT-only
+      // limiter; it must not be applied to DML. The earlier code only
+      // considered this branch when `maxRows` was set; we keep that
+      // gate but lift the BEGIN/END wrap out so it always applies for
+      // multi-statement input.
+      const processedStatements = options.maxRows
+        ? statements.map((statement) => {
+            if (statement.trim().toUpperCase().startsWith('SELECT') && !statement.toUpperCase().includes('FETCH FIRST')) {
+              return `${statement} FETCH FIRST ${options.maxRows} ROWS ONLY`;
+            }
+            return SQLRowLimiter.applyMaxRows(statement, options.maxRows);
+          })
+        : statements;
 
-        processedSQL = processedStatements.join(';\n');
-
-        // Oracle requires a PL/SQL block for multi-statement execution
-        if (processedStatements.length > 1) {
-          processedSQL = `BEGIN\n${processedSQL};\nEND;`;
-        }
-      }
+      const processedSQL = isMultiStatement
+        ? `BEGIN\n${processedStatements.join(';\n')};\nEND;`
+        : (processedStatements[0] ?? sql);
 
       const result = await conn.execute(processedSQL, parameters || [], execOptions);
 
