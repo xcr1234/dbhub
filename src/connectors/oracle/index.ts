@@ -444,8 +444,7 @@ export class OracleConnector implements Connector {
       // We split the input unconditionally — `splitSQLStatements` is a
       // no-op for a single statement — and wrap whenever the result has
       // more than one element. The previous version only did this when
-      // `options.maxRows` was set, which left plain `INSERT; INSERT;
-COMMIT;` scripts broken.
+      // `options.maxRows` was set, which left plain `INSERT; INSERT; COMMIT;` scripts broken.
       const statements = splitSQLStatements(sql, "oracle");
       const isMultiStatement = statements.length > 1;
 
