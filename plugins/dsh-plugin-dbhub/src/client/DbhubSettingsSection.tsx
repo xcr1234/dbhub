@@ -347,7 +347,18 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
 
   const onEditSave = useCallback(() => {
     if (editing === null || draft === null) return
-    const nextErrors = validateDraft(editing, takenIds, t)
+    // When editing an existing source, exclude its ORIGINAL id from
+    // the duplicate-id check. `takenIds` is built from the whole
+    // draft config and therefore includes the row the user is
+    // editing — without this carve-out, saving any edit to an
+    // existing connection would trip `form.error.duplicateId` even
+    // when the user kept the id exactly the same. Only NEW sources
+    // (draftId starts with `new-`) genuinely need to avoid every
+    // existing id.
+    const isNew = editing.draftId.startsWith('new-')
+    const idsForDupCheck = new Set(takenIds)
+    if (!isNew) idsForDupCheck.delete(editing.draftId)
+    const nextErrors = validateDraft(editing, idsForDupCheck, t)
     if (hasErrors(nextErrors)) {
       setErrors(nextErrors)
       return
@@ -360,7 +371,6 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
     else return
 
     const next: DbhubConfig = { ...draft }
-    const isNew = editing.draftId.startsWith('new-')
     const source: DbhubSource = { id: editing.id, dsn }
     if (isNew) {
       next.sources = [...draft.sources, source]
@@ -502,7 +512,11 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
           <div className={C.editorBody}>
             <Field
               label={t('form.id')}
-              hint={t('form.idHint')}
+              hint={
+                editing.draftId.startsWith('new-')
+                  ? t('form.idHint')
+                  : t('form.idLockedHint')
+              }
               error={errors.id}
             >
               <input
@@ -510,6 +524,15 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
                 value={editing.id}
                 onChange={(e) => onEditChange({ id: e.target.value })}
                 placeholder="my_postgres"
+                // The id is the source's stable namespace — the
+                // model-facing tool prefix (mcp__dbhub__<id>__...) is
+                // built from it, and the on-disk TOML row's key is
+                // keyed by it. Renaming would orphan any references,
+                // so we lock it on edit. To "rename", the user should
+                // remove the connection and add a fresh one with the
+                // new id.
+                disabled={!editing.draftId.startsWith('new-')}
+                readOnly={!editing.draftId.startsWith('new-')}
               />
             </Field>
 
