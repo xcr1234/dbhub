@@ -1,15 +1,10 @@
 # Workflow for publishing DBHub to the MCP Registry
-# Triggers when server.json is updated on main branch, or manually
+# Trigger: only manual via workflow_dispatch.
 
 name: Publish to MCP Registry
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'server.json'
 
 jobs:
   publish:

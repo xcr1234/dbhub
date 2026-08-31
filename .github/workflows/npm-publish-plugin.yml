@@ -1,0 +1,138 @@
+# Manual publish workflow for @xcr1234/dsh-plugin-dbhub
+#
+# Trigger: only manual via workflow_dispatch.
+# Auth:    OIDC trusted publishing (no NPM_TOKEN needed).
+#          Configure trusted publisher at https://www.npmjs.com/package/@xcr1234/dsh-plugin-dbhub/access
+#            - Repository: xcr1234/dbhub
+#            - Workflow filename: npm-publish-plugin.yml
+#            - Environment: (leave empty)
+#
+# Notes:
+#   * This plugin is part of a pnpm workspace. Install and build must run from the
+#     repo root so workspace links resolve correctly.
+#   * Before publishing, the workspace-protocol dependency on @xcr1234/dbhub-fork
+#     is rewritten to a real semver range, otherwise downstream `npm install`
+#     would choke on `workspace:^...`.
+#   * The plugin's `prepublishOnly` script runs `typecheck && test && build`
+#     automatically — no need to duplicate those steps here.
+#
+# Usage:
+#   1. Bump `version` in plugins/dsh-plugin-dbhub/package.json on a branch and merge.
+#   2. Make sure the new @xcr1234/dbhub-fork version is already published to npm.
+#   3. GitHub → "Publish plugin to npm" → Run workflow.
+#        - version       : blank = use plugins/dsh-plugin-dbhub/package.json version, or override
+#        - tag           : blank = derive from version (e.g. 1.2.0-beta.1 → beta, 1.2.0 → latest)
+#        - dbhub_version : the @xcr1234/dbhub-fork version to depend on (must already be on npm)
+
+name: Publish plugin to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Plugin version to publish (blank = use plugins/dsh-plugin-dbhub/package.json version)"
+        required: false
+        default: ""
+      tag:
+        description: "npm dist-tag (latest, beta, next, ...). Blank = infer from version."
+        required: false
+        default: ""
+      dbhub_version:
+        description: "@xcr1234/dbhub-fork version to depend on (must be published first)"
+        required: false
+        default: ""
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: latest
+
+      # Monorepo install MUST run from the repo root so workspace links resolve.
+      - name: Install dependencies (workspace root)
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve plugin version, tag, dbhub dependency
+        run: |
+          set -euo pipefail
+
+          PLUGIN_DIR="plugins/dsh-plugin-dbhub"
+          PLUGIN_JSON="${PLUGIN_DIR}/package.json"
+          ROOT_JSON="package.json"
+
+          # 1. Plugin version
+          if [ -n "${{ inputs.version }}" ]; then
+            PLUGIN_VERSION="${{ inputs.version }}"
+            echo "Manual override version: ${PLUGIN_VERSION}"
+          else
+            PLUGIN_VERSION=$(jq -r '.version' "$PLUGIN_JSON")
+            echo "Using plugin version from package.json: ${PLUGIN_VERSION}"
+          fi
+
+          # 2. npm dist-tag
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+            echo "Using explicit tag from input: ${TAG}"
+          elif [[ "${PLUGIN_VERSION}" == *"-"* ]]; then
+            TAG=$(echo "${PLUGIN_VERSION}" | cut -d'-' -f2 | cut -d'.' -f1)
+            echo "Prerelease detected — derived tag: ${TAG}"
+          else
+            TAG="latest"
+            echo "Stable version — using tag: latest"
+          fi
+
+          # 3. dbhub version (the plugin's @xcr1234/dbhub-fork dep)
+          if [ -n "${{ inputs.dbhub_version }}" ]; then
+            DBHUB_VERSION="${{ inputs.dbhub_version }}"
+          else
+            DBHUB_VERSION=$(jq -r '.version' "$ROOT_JSON")
+          fi
+          echo "Plugin will depend on @xcr1234/dbhub-fork@^${DBHUB_VERSION}"
+
+          # 4. Rewrite the plugin manifest:
+          #    - bump version
+          #    - replace the `workspace:^x.y.z` dep with a real semver range
+          #      so downstream `npm install` works.
+          jq --arg v "$PLUGIN_VERSION" --arg d "$DBHUB_VERSION" '
+            .version = $v
+            | .dependencies["@xcr1234/dbhub-fork"] = ("^\($d)")
+          ' "$PLUGIN_JSON" > "${PLUGIN_JSON}.tmp"
+          mv "${PLUGIN_JSON}.tmp" "$PLUGIN_JSON"
+
+          # 5. Export for the publish step
+          {
+            echo "PLUGIN_VERSION=${PLUGIN_VERSION}"
+            echo "NPM_TAG=${TAG}"
+            echo "DBHUB_VERSION=${DBHUB_VERSION}"
+          } >> "$GITHUB_ENV"
+
+          echo "Will publish @xcr1234/dsh-plugin-dbhub@${PLUGIN_VERSION} (tag: ${TAG})"
+
+      - name: Build plugin (runs typecheck + test + build via prepublishOnly)
+        working-directory: plugins/dsh-plugin-dbhub
+        run: pnpm run build
+
+      - name: Publish plugin to npm
+        working-directory: plugins/dsh-plugin-dbhub
+        run: |
+          echo "Publishing @xcr1234/dsh-plugin-dbhub@${PLUGIN_VERSION} (tag: ${NPM_TAG})"
+          pnpm config set registry https://registry.npmjs.org
+          # --provenance   : OIDC-backed npm provenance attestation
+          # --no-git-checks: monorepo builds emit untracked files; skip the dirty-git guard
+          pnpm publish --provenance --tag "${NPM_TAG}" --no-git-checks --access public
+          echo "Published."

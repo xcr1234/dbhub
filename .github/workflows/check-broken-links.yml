@@ -1,16 +1,6 @@
 name: Check Broken Links
 
 on:
-  pull_request:
-    paths:
-      - 'docs/**'
-      - '.github/workflows/check-broken-links.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'docs/**'
-      - '.github/workflows/check-broken-links.yml'
   workflow_dispatch:
 
 jobs:
