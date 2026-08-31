@@ -253,6 +253,15 @@ fetch 有 3s `AbortController` 超时，失败时静默返回 `[]`——从不�
 4. 两边的 zod schema 都从 `src/shared/types.ts` import —— 单一来源，
    双向校验。
 
+调用 dbhub 子进程的后台操作（如 `dbhub/testConnection`）：
+- **永远不依赖长驻 dbhub 在跑**。如果你的功能需要 dbhub 但长驻实例
+  还没起，就在 dbhub 主仓加一次性 CLI flag（如 `--test-dsn=<dsn>`），
+  插件 host `spawn` 一个新子进程跑那次操作后退出。
+- 新增方法挂 `DbhubRuntime` 上（参考 `testDsn(dsn)`），`DbhubService`
+  的 `@Remote` 转调它。子进程 stdout 解析 JSON，stderr 透传带前缀。
+- 设总超时（`AbortController` 兜底），超时 / spawn 失败 / 解析失败都
+  转成结构化结果返回，**不抛** —— 面板永远能拿到可渲染的状态。
+
 ---
 
 ## 7. 调试
@@ -351,6 +360,28 @@ pnpm install E:\dev\dbhub\plugins\dsh-plugin-dbhub
 
 写在 `dbhub.toml` 里的非 `id`/`dsn` 字段 **会被插件保留**：见 §3.2。
 `id` 和 `dsn` 是面板的字段，要改走面板或 `settings.yaml`。
+
+### 测试连接
+
+编辑表单底部有"测试连接"按钮，可以对**未保存的** DSN 做一次性连通性
+验证：
+
+- 走 dbhub 主仓的 `--test-dsn=<dsn>` 一次性 CLI flag，每次点按钮
+  spawn 一个新子进程，**不污染**长驻 MCP 服务器
+- dbhub 没起时也能用（编辑首个连接时常见）
+- 成功显示绿色 chip 带耗时（如"连接成功（42 ms）"），失败显示红色
+  chip 带原始错误信息
+- 改字段后 chip 自动失效（基于 DSN 字符串比较，不显式 reset）
+
+dbhub 主仓那边对应是一次性模式：
+
+```sh
+node dist/index.js --test-dsn='postgres://user:pass@host:5432/db'
+# stdout: {"ok":true,"latencyMs":42,"dbType":"postgres","serverVersion":"..."}
+# 退出码 0；失败时 {"ok":false,"error":"..."} 退出码 1
+```
+
+不依赖任何长驻状态，所以调试或脚本化都方便。
 
 ---
 

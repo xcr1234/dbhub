@@ -4,7 +4,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { inferDbType, type DbhubConfig, type DbhubSource, type DbhubTool, type DbhubView } from '../shared/types.ts'
+import {
+  inferDbType,
+  type DbhubConfig,
+  type DbhubSource,
+  type DbhubTestInput,
+  type DbhubTestResult,
+  type DbhubTool,
+  type DbhubView,
+} from '../shared/types.ts'
 import {
   composeDsn,
   DB_TYPE_LABELS,
@@ -30,6 +38,9 @@ export interface DbhubRemote {
   save(
     input: DbhubConfig,
   ): Promise<{ ok: true; value: DbhubView } | { ok: false; error: Error }>
+  testConnection(
+    input: DbhubTestInput,
+  ): Promise<{ ok: true; value: DbhubTestResult } | { ok: false; error: Error }>
 }
 
 export interface DbhubSettingsSectionProps {
@@ -203,6 +214,17 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  // `testing` mirrors `saving` for the "test connection" button — drives
+  // the button label (连接中… vs 测试连接) and disables the form while
+  // the host spawns a one-shot dbhub child process. `testResult` keeps
+  // the last probe outcome so the editor can render a green / red chip
+  // until the user types again or saves. `lastTestedDsn` records the
+  // DSN we last probed; the chip only renders when the current
+  // `previewDsn` matches it, so typing in any field invalidates the
+  // chip implicitly without needing an explicit reset call everywhere.
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<DbhubTestResult | null>(null)
+  const [lastTestedDsn, setLastTestedDsn] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     const result = await remote.list()
@@ -271,6 +293,41 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
     setErrors({})
     setSaveError(null)
   }, [view])
+
+  /**
+   * Probe the DSN currently in the editor via the host's one-shot
+   * `--test-dsn` child process. The result chip stays visible only
+   * while `previewDsn` matches the DSN we just tested — typing in
+   * any field invalidates it implicitly, so the user never sees a
+   * stale success against a changed DSN.
+   */
+  const onTest = useCallback(async () => {
+    if (editing === null) return
+    const dsn =
+      editing.fields !== null
+        ? composeDsn(editing.fields)
+        : editing.rawDsnFallback ?? ''
+    if (dsn.length === 0) return
+    setTesting(true)
+    setTestResult(null)
+    const result = await remote.testConnection({ dsn })
+    setTesting(false)
+    if (result.ok) {
+      setTestResult(result.value)
+    } else {
+      // Wrap the wire-level failure as a structured DbhubTestResult so
+      // the chip renders the same shape — never re-throw, the panel
+      // treats everything from this endpoint as a renderable outcome.
+      setTestResult({
+        ok: false,
+        latencyMs: 0,
+        dbType: null,
+        serverVersion: null,
+        error: result.error.message,
+      })
+    }
+    setLastTestedDsn(dsn)
+  }, [editing, remote])
 
   const onAdd = useCallback(() => {
     setEditing(newDraft())
@@ -663,10 +720,76 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
             )}
           </div>
           <div className={C.editorFooter}>
-            <button className={C.btn} onClick={onEditCancel} disabled={saving}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0, paddingTop: 4 }}>
+              {/* Result chip only renders when the editor's current
+                  preview DSN still matches what we last probed. Typing
+                  in any field invalidates it implicitly (previewDsn
+                  changes, lastTestedDsn doesn't), so the chip never
+                  shows a stale verdict against a changed DSN.
+
+                  Success uses a single-line badge (the latency + short
+                  message fits). Failure uses a block element so a
+                  multi-line Oracle / Postgres error like
+                  `ORA-01017: invalid credential or not authorized;\nlogon denied\nHelp: ...`
+                  wraps cleanly instead of being clipped — .dshdb-badge
+                  is fixed at 20px height, which is why we drop the
+                  class here and recreate the look inline. */}
+              {testResult !== null && lastTestedDsn === previewDsn ? (
+                testResult.ok ? (
+                  <span
+                    className={`${C.badge} ${C.badgeOk}`}
+                    title={testResult.serverVersion ?? ''}
+                    style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {t('editor.testOk', { latencyMs: String(testResult.latencyMs) })}
+                  </span>
+                ) : (
+                  <div
+                    className={C.badgeError}
+                    title={testResult.error ?? ''}
+                    style={{
+                      maxWidth: '100%',
+                      padding: '4px 8px',
+                      borderRadius: 8,
+                      fontSize: 11,
+                      lineHeight: '16px',
+                      // Preserve real newlines from the connector's
+                      // error message; long unbroken strings (URLs,
+                      // DSNs in error text) break anywhere instead of
+                      // pushing the buttons offscreen.
+                      whiteSpace: 'pre-wrap',
+                      overflowWrap: 'anywhere',
+                      textAlign: 'left',
+                      alignSelf: 'flex-start',
+                    }}
+                  >
+                    {t('editor.testFail', { message: testResult.error ?? '' })}
+                  </div>
+                )
+              ) : null}
+            </div>
+            <button
+              className={C.btn}
+              onClick={onEditCancel}
+              disabled={saving || testing}
+              style={{ alignSelf: 'center', flexShrink: 0 }}
+            >
               {t('action.cancel')}
             </button>
-            <button className={`${C.btn} ${C.btnPrimary}`} onClick={onEditSave} disabled={saving}>
+            <button
+              className={C.btn}
+              onClick={onTest}
+              disabled={saving || testing || previewDsn.length === 0}
+              style={{ alignSelf: 'center', flexShrink: 0 }}
+            >
+              {testing ? t('editor.testing') : t('editor.test')}
+            </button>
+            <button
+              className={`${C.btn} ${C.btnPrimary}`}
+              onClick={onEditSave}
+              disabled={saving || testing}
+              style={{ alignSelf: 'center', flexShrink: 0 }}
+            >
               {t('action.save')}
             </button>
           </div>
