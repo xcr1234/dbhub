@@ -4,6 +4,30 @@
   "description": "DSH plugin: manage dbhub database MCP servers from the settings panel; starts dbhub in-process (no npx) and exposes its tools via dsh-mcp-client.",
   "type": "module",
   "license": "MIT",
+  "author": "xcr1234",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xcr1234/dbhub.git",
+    "directory": "plugins/dsh-plugin-dbhub"
+  },
+  "bugs": {
+    "url": "https://github.com/xcr1234/dbhub/issues"
+  },
+  "homepage": "https://github.com/xcr1234/dbhub/tree/main/plugins/dsh-plugin-dbhub#readme",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "mcp",
+    "dbhub",
+    "database",
+    "postgres",
+    "mysql",
+    "sqlite"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
@@ -52,7 +76,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node tests/runner.mjs",
     "format": "biome format --write src tests",
-    "lint": "biome check src tests"
+    "lint": "biome check src tests",
+    "prepublishOnly": "pnpm run typecheck && pnpm test && pnpm run build",
+    "prepack": "pnpm run build"
   },
   "peerDependencies": {
     "react": "^18.2.0",
@@ -72,7 +98,8 @@
     "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.0.0",
-    "@iarna/toml": "^2.2.5"
+    "@iarna/toml": "^2.2.5",
+    "@xcr1234/dbhub-fork": "^1.10.0"
   },
   "devDependencies": {
     "@iarna/toml": "^2.2.5",

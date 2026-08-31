@@ -27,7 +27,7 @@ import { type Context } from '@deepseek-ai/cordis'
 // WeakMap to be visible to the typert gateway.
 import { Remote, TypertRemoteService } from '../typert-bridge.js'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
-import { dbhubConfigSchema, type DbhubConfig, type DbhubTool, type DbhubView } from '../shared/types.ts'
+import { dbhubConfigSchema, type DbhubConfig, type DbhubTestInput, type DbhubTestResult, type DbhubTool, type DbhubView } from '../shared/types.ts'
 import { assertValidDsn, configToToml, parsePreservedFields, type PreservedFields } from '../shared/toml.ts'
 import { ensureConfigDir, resolveConfigPath } from './config-file.ts'
 import { DbhubRuntime } from './runtime.ts'
@@ -88,6 +88,25 @@ export class DbhubService extends TypertRemoteService {
   @Remote
   async listTools(): Promise<DbhubTool[]> {
     return this.runtime.listTools()
+  }
+
+  /**
+   * TYPERT: run a one-shot connectivity probe against `input.dsn`. Forwards
+   * to dbhub's `--test-dsn` CLI via a dedicated child process — the
+   * long-running MCP server is never disturbed, so this works for
+   * un-saved DSNs and doesn't pollute the connection pool.
+   *
+   * Validates the DSN shape before spawning so blatantly bad input
+   * (empty, unknown protocol) is rejected without a process round trip;
+   * everything else (DNS, TCP, auth, SSL) is caught inside the child
+   * and surfaced as a structured `{ok:false, error}` result.
+   */
+  @Remote
+  async testConnection(input: DbhubTestInput): Promise<DbhubTestResult> {
+    // `assertValidDsn` throws on unknown protocol. The error message
+    // is already user-friendly thanks to `shared/toml.ts`.
+    assertValidDsn(input.dsn, 'ad-hoc')
+    return this.runtime.testDsn(input.dsn)
   }
 
   /**

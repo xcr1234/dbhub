@@ -21,6 +21,8 @@
 import { z } from 'zod'
 import {
   dbhubSaveInputSchema,
+  dbhubTestInputSchema,
+  dbhubTestResultSchema,
   dbhubToolListSchema,
   dbhubViewSchema,
 } from './shared/types.ts'
@@ -57,6 +59,11 @@ export const TYPERT = {
             kind: 'method' as const,
             signature: '(input: DbhubConfig): Promise<DbhubView>',
           },
+          {
+            name: 'testConnection',
+            kind: 'method' as const,
+            signature: '(input: DbhubTestInput): Promise<DbhubTestResult>',
+          },
         ],
         types: [
           {
@@ -78,6 +85,16 @@ export const TYPERT = {
             name: 'DbhubView',
             declaration:
               'export interface DbhubView { config: DbhubConfig; running: boolean; lastError: string | null; configPath: string; tools: DbhubTool[] }',
+          },
+          {
+            name: 'DbhubTestInput',
+            declaration:
+              'export interface DbhubTestInput { dsn: string }',
+          },
+          {
+            name: 'DbhubTestResult',
+            declaration:
+              'export interface DbhubTestResult { ok: boolean; latencyMs: number; dbType: string | null; serverVersion: string | null; error: string | null }',
           },
         ],
       },
@@ -119,6 +136,22 @@ export const TYPERT = {
         },
       ],
       result: result('DbhubView', dbhubViewSchema),
+    },
+    {
+      id: `${PKG}#dbhub/testConnection`,
+      service: 'dbhub',
+      namespace: 'dbhub',
+      method: 'testConnection',
+      invocation: direct,
+      parameters: [
+        {
+          name: 'input',
+          wire: 'input' as const,
+          source: 'json' as const,
+          codec: jsonCodec('DbhubTestInput', dbhubTestInputSchema),
+        },
+      ],
+      result: result('DbhubTestResult', dbhubTestResultSchema),
     },
   ],
 }

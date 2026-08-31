@@ -31,7 +31,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir, platform } from 'node:os'
-import type { DbhubConfig, DbhubTool } from '../shared/types.ts'
+import type { DbhubConfig, DbhubTestResult, DbhubTool } from '../shared/types.ts'
 
 /** Options the host passes to dbhub via argv. */
 export interface StartServerOptions {
@@ -57,6 +57,8 @@ interface ActiveServer {
 }
 
 const SIGTERM_GRACE_MS = 5_000
+/** Wall-clock budget for a single `--test-dsn` probe. Covers DNS + TCP + auth + liveness query. */
+const TEST_DSN_TIMEOUT_MS = 8_000
 /** Package name that identifies the dbhub monorepo's root package.json. */
 const DBHUB_PACKAGE_NAME = '@xcr1234/dbhub-fork'
 /** Hard-coded fallback paths tried last, on platforms where the
@@ -235,6 +237,115 @@ export class DbhubRuntime {
       return []
     } finally {
       clearTimeout(timer)
+    }
+  }
+
+  /**
+   * Run a one-shot DSN connectivity probe by spawning a dedicated
+   * `dbhub --test-dsn=<dsn>` child process. Used by the panel's
+   * "test connection" button; never touches the long-running MCP
+   * server so callers can test un-saved DSNs without disturbing the
+   * pool. Always returns a structured {@link DbhubTestResult} — never
+   * throws, so the panel can render the failure state without a
+   * second error path.
+   *
+   * The probe times out after {@link TEST_DSN_TIMEOUT_MS}; on expiry
+   * we SIGTERM the child (with the same 5s grace as the long-running
+   * process) and return `{ok:false, error: "test timed out"}`.
+   */
+  async testDsn(dsn: string): Promise<DbhubTestResult> {
+    const startedAt = Date.now()
+    const failure = (error: string): DbhubTestResult => ({
+      ok: false,
+      latencyMs: Date.now() - startedAt,
+      dbType: null,
+      serverVersion: null,
+      error,
+    })
+    const bin = resolveDbhubBin()
+    if (!existsSync(bin)) {
+      return failure(
+        `dbhub binary not found at ${bin} (set DBHUB_BIN env or install @xcr1234/dbhub-fork alongside this plugin)`,
+      )
+    }
+    // The child emits a single JSON line on stdout and human-readable
+    // diagnostics on stderr. We only need stdout; stderr is forwarded
+    // through for the dsh web log so debug-build users can correlate.
+    let child: ChildProcess
+    try {
+      child = spawn(process.execPath, [bin, `--test-dsn=${dsn}`], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+        env: { ...process.env, NODE_ENV: 'production' },
+      })
+    } catch (err) {
+      return failure(err instanceof Error ? err.message : String(err))
+    }
+
+    const prefix = '[dbhub-test] '
+    child.stderr?.on('data', (chunk: Buffer) => {
+      process.stderr.write(prefix + chunk.toString('utf8'))
+    })
+
+    // Accumulate stdout until the child exits, then parse the final
+    // JSON line. dbhub writes exactly one line, but the buffer is
+    // trimmed defensively in case the driver prepended noise.
+    const stdoutChunks: Buffer[] = []
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdoutChunks.push(chunk)
+    })
+
+    const exitPromise = new Promise<number | null>((resolve) => {
+      child.once('exit', (code) => resolve(code))
+      child.once('error', () => resolve(null))
+    })
+
+    const timeout = new Promise<'timeout'>((resolve) => {
+      const t = setTimeout(() => resolve('timeout'), TEST_DSN_TIMEOUT_MS)
+      t.unref?.()
+    })
+
+    const result = await Promise.race([exitPromise, timeout])
+    if (result === 'timeout') {
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        // already dead
+      }
+      const force = setTimeout(() => {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // already dead
+        }
+      }, SIGTERM_GRACE_MS)
+      force.unref?.()
+      return failure(`test timed out after ${String(TEST_DSN_TIMEOUT_MS)}ms`)
+    }
+
+    const text = Buffer.concat(stdoutChunks).toString('utf8').trim()
+    if (text.length === 0) {
+      return failure('dbhub test process produced no output')
+    }
+    // dbhub writes exactly one JSON line; in case of trailing noise we
+    // take the last non-empty line.
+    const lastLine = text.split(/\r?\n/).filter((l) => l.length > 0).pop() ?? ''
+    try {
+      const parsed = JSON.parse(lastLine) as Partial<DbhubTestResult>
+      if (typeof parsed.ok !== 'boolean') {
+        return failure(`dbhub test produced malformed JSON: ${lastLine.slice(0, 200)}`)
+      }
+      return {
+        ok: parsed.ok,
+        latencyMs: typeof parsed.latencyMs === 'number' ? parsed.latencyMs : Date.now() - startedAt,
+        dbType: typeof parsed.dbType === 'string' ? parsed.dbType : null,
+        serverVersion: typeof parsed.serverVersion === 'string' ? parsed.serverVersion : null,
+        error: typeof parsed.error === 'string' ? parsed.error : null,
+      }
+    } catch (err) {
+      return failure(
+        `failed to parse dbhub test output: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 

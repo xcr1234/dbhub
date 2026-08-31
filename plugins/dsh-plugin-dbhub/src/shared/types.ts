@@ -80,6 +80,47 @@ export const dbhubConfigZodSchema = z.object({
 /** Zod schema for the `dbhub/save` input — a full new config to persist. */
 export const dbhubSaveInputSchema = dbhubConfigZodSchema
 
+/**
+ * Input for the `dbhub/testConnection` endpoint. A single DSN to probe;
+ * the host forwards this to dbhub's `--test-dsn` CLI and surfaces the
+ * structured result back to the panel.
+ */
+export interface DbhubTestInput {
+  dsn: string
+}
+
+export const dbhubTestInputSchema = z.object({
+  dsn: z.string().min(1),
+})
+
+/**
+ * Result of a one-shot connectivity probe. The host runs a fresh dbhub
+ * child process for each call so the long-running MCP server is never
+ * disturbed; `latencyMs` covers the whole connect + liveness query +
+ * disconnect round trip.
+ *
+ * `serverVersion` is null when the probe failed before reaching the
+ * version query, or when the connector has no version concept (sqlite).
+ */
+export interface DbhubTestResult {
+  ok: boolean
+  latencyMs: number
+  /** Inferred protocol; undefined when the DSN's protocol was unrecognised. */
+  dbType: string | null
+  /** Database server's own version string when reachable, otherwise null. */
+  serverVersion: string | null
+  /** Human-readable error message on the failure branch; otherwise null. */
+  error: string | null
+}
+
+export const dbhubTestResultSchema = z.object({
+  ok: z.boolean(),
+  latencyMs: z.number(),
+  dbType: z.string().nullable(),
+  serverVersion: z.string().nullable(),
+  error: z.string().nullable(),
+})
+
 /** The `dbhub/list` view: current config plus runtime phase info. */
 export interface DbhubView {
   config: DbhubConfig

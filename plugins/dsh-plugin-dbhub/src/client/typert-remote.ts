@@ -10,6 +10,8 @@
 import { z } from 'zod'
 import {
   dbhubSaveInputSchema,
+  dbhubTestInputSchema,
+  dbhubTestResultSchema,
   dbhubToolListSchema,
   dbhubViewSchema,
 } from '../shared/types.ts'
@@ -60,6 +62,22 @@ export const TYPERT_REMOTE = {
         },
       ],
       result: result('DbhubView', dbhubViewSchema),
+    },
+    {
+      id: `${PKG}#dbhub/testConnection`,
+      service: 'dbhub',
+      namespace: 'dbhub',
+      method: 'testConnection',
+      invocation: direct,
+      parameters: [
+        {
+          name: 'input',
+          wire: 'input' as const,
+          source: 'json' as const,
+          codec: jsonCodec('DbhubTestInput', dbhubTestInputSchema),
+        },
+      ],
+      result: result('DbhubTestResult', dbhubTestResultSchema),
     },
   ],
 }
