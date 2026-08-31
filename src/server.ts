@@ -179,9 +179,6 @@ See documentation for more details on configuring database connections.
     // Resolve transport type (for MCP server)
     const transportData = resolveTransport();
 
-    // Resolve port for HTTP server (only needed for http transport)
-    const port = transportData.type === "http" ? resolvePort().port : null;
-
     // Print ASCII art banner with version and slogan
     // Collect active modes
     const activeModes: string[] = [];
@@ -214,6 +211,7 @@ See documentation for more details on configuring database connections.
     // Set up transport-specific server
     if (transportData.type === "http") {
       // HTTP transport: Start Express server with MCP endpoint and workbench
+      const port = resolvePort().port;
       const app = express();
 
       // Enable JSON parsing
