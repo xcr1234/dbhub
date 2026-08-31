@@ -246,12 +246,35 @@ export class DbhubService extends TypertRemoteService {
       }
     }
     const text = configToToml(this.currentConfig, preserved)
-    const tmp = `${target}.${randomBytes(6).toString('hex')}.tmp`
     mkdirSync(dirname(target), { recursive: true })
-    writeFileSync(tmp, text, 'utf8')
     try {
-      if (existsSync(target)) unlinkSync(target)
-      renameSync(tmp, target)
+      if (process.platform === 'win32') {
+        // Windows `fs.rename` refuses to overwrite an existing target,
+        // so we round-trip through a sibling tmp file. dbhub's
+        // watcher (`src/utils/config-watcher.ts`) now treats both
+        // `change` and `rename` events as reload signals, so Windows
+        // reloads whether or not fs.watch emits `change` for the
+        // unlink+rename sequence.
+        const tmp = `${target}.${randomBytes(6).toString('hex')}.tmp`
+        writeFileSync(tmp, text, 'utf8')
+        if (existsSync(target)) unlinkSync(target)
+        renameSync(tmp, target)
+      } else {
+        // POSIX: write directly. Truncate + write in a single syscall
+        // (the kernel keeps the old page-cache contents until the new
+        // data lands, so readers see either the old file or the new
+        // one — never a partial). The `change` event fs.watch emits
+        // here is what triggers dbhub's hot reload on macOS/Linux.
+        //
+        // We previously did tmp + unlink + rename on POSIX too, but
+        // that emits only `rename` events on macOS — dbhub's older
+        // watcher filtered on `change` only and silently missed them,
+        // so the rebuild would only take effect after a manual
+        // restart. Writing in place avoids that whole class of bug
+        // at the cost of giving up tmp-file crash safety, which is
+        // acceptable for a small settings file like this one.
+        writeFileSync(target, text, 'utf8')
+      }
       console.warn(`[dbhub] writeToml wrote ${target} (${String(text.length)} bytes)`)
     } catch (err) {
       console.warn(
