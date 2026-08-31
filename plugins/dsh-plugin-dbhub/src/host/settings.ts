@@ -17,7 +17,7 @@
  * @module @xcr1234/dsh-plugin-dbhub/host
  */
 
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { type Context } from '@deepseek-ai/cordis'
@@ -28,7 +28,7 @@ import { type Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '../typert-bridge.js'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { dbhubConfigSchema, type DbhubConfig, type DbhubTool, type DbhubView } from '../shared/types.ts'
-import { assertValidDsn, configToToml } from '../shared/toml.ts'
+import { assertValidDsn, configToToml, parsePreservedFields, type PreservedFields } from '../shared/toml.ts'
 import { ensureConfigDir, resolveConfigPath } from './config-file.ts'
 import { DbhubRuntime } from './runtime.ts'
 
@@ -206,9 +206,15 @@ export class DbhubService extends TypertRemoteService {
   private async reconcile(): Promise<void> {
     try {
       await this.runtime.ensure(this.currentConfig, this.resolveConfigPath())
-    } catch {
-      // runtime records the error in its lastError; nothing to do
-      // here besides preventing an unhandled rejection.
+    } catch (err) {
+      // The runtime already records this in `lastError` for the
+      // panel, but we ALSO log here so dsh-web's stderr carries it
+      // for headless debugging. Without this line, a "binary not
+      // found" failure looks identical to "everything's fine" to
+      // anyone tailing the dsh log.
+      console.warn(
+        `[dbhub] reconcile failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
@@ -222,8 +228,24 @@ export class DbhubService extends TypertRemoteService {
     }
     const loader = this.ctx.get('loader')
     ensureConfigDir(loader)
-    const text = configToToml(this.currentConfig)
     const target = this.resolveConfigPath()
+    // Preserve unknown per-source fields (SSH/SSL/query_timeout/etc.)
+    // that the user hand-edited into the existing file. The panel's
+    // own keys (id, dsn) win on conflict; sources whose id disappears
+    // from the new config are dropped (the user removed them on
+    // purpose). A parse error on the previous file is logged but
+    // non-fatal — we'd rather write a clean config than block a save.
+    let preserved: PreservedFields = {}
+    if (existsSync(target)) {
+      try {
+        preserved = parsePreservedFields(readFileSync(target, 'utf8'))
+      } catch (err) {
+        console.warn(
+          `[dbhub] writeToml: failed to read previous TOML for preservation: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+    }
+    const text = configToToml(this.currentConfig, preserved)
     const tmp = `${target}.${randomBytes(6).toString('hex')}.tmp`
     mkdirSync(dirname(target), { recursive: true })
     writeFileSync(tmp, text, 'utf8')

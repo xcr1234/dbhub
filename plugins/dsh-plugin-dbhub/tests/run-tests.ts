@@ -13,7 +13,7 @@
  */
 
 const here = new URL('.', import.meta.url)
-const files = ['./toml.test.ts']
+const files = ['./toml.test.ts', './dsn.test.ts']
 for (const file of files) {
   await import(new URL(file, here).href)
 }

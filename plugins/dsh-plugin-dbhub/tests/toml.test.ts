@@ -12,7 +12,7 @@
 
 import assert from 'node:assert/strict'
 import toml from '@iarna/toml'
-import { assertValidDsn, configToToml, tomlToConfig } from '../src/shared/toml.ts'
+import { assertValidDsn, configToToml, parsePreservedFields, tomlToConfig, type PreservedFields } from '../src/shared/toml.ts'
 import { dbhubConfigZodSchema, type DbhubConfig, inferDbType } from '../src/shared/types.ts'
 
 const expect = assert
@@ -162,6 +162,180 @@ describe('dbhubConfigZodSchema (wire shape)', () => {
   t('rejects an out-of-range port', () => {
     const result = dbhubConfigZodSchema.safeParse({ port: 70000, enabled: true, sources: [] })
     expect.equal(result.success, false)
+  })
+})
+
+describe('parsePreservedFields', () => {
+  t('returns an empty object for invalid TOML', () => {
+    expect.deepEqual(parsePreservedFields('not valid [[['), {})
+  })
+  t('returns an empty object when there are no sources', () => {
+    expect.deepEqual(parsePreservedFields('# comment\nport = 8080\n'), {})
+  })
+  t('returns an empty object for empty input', () => {
+    expect.deepEqual(parsePreservedFields(''), {})
+  })
+  t('skips sources with no id (no key to merge with)', () => {
+    const text = '[[sources]]\ndsn = "postgres://u@h/db"\n'
+    expect.deepEqual(parsePreservedFields(text), {})
+  })
+  t('extracts unknown fields keyed by source id', () => {
+    const text = [
+      '[[sources]]',
+      'id = "main"',
+      'dsn = "postgres://u:p@h/db"',
+      'ssh_host = "bastion.example"',
+      'ssh_user = "ops"',
+      '',
+      '[[sources]]',
+      'id = "other"',
+      'dsn = "mysql://u:p@h/db"',
+      'sslmode = "verify-full"',
+    ].join('\n')
+    expect.deepEqual(parsePreservedFields(text), {
+      main: { ssh_host: 'bastion.example', ssh_user: 'ops' },
+      other: { sslmode: 'verify-full' },
+    })
+  })
+  t('skips sources whose only fields are id and dsn', () => {
+    const text = '[[sources]]\nid = "main"\ndsn = "postgres://u@h/db"\n'
+    expect.deepEqual(parsePreservedFields(text), {})
+  })
+  t('handles nested TOML tables (e.g. [sources.ssh])', () => {
+    const text = [
+      '[[sources]]',
+      'id = "main"',
+      'dsn = "postgres://u:p@h/db"',
+      '',
+      '[sources.ssh]',
+      'host = "bastion.example"',
+      'port = 22',
+    ].join('\n')
+    expect.deepEqual(parsePreservedFields(text), {
+      main: { ssh: { host: 'bastion.example', port: 22 } },
+    })
+  })
+})
+
+describe('configToToml with preserved fields', () => {
+  t('still emits a clean TOML when no preserved fields are passed', () => {
+    const config: DbhubConfig = {
+      port: 18080,
+      enabled: true,
+      sources: [{ id: 'main', dsn: 'postgres://u:p@h/db' }],
+    }
+    const text = configToToml(config)
+    const back = toml.parse(text) as { sources: Array<Record<string, unknown>> }
+    expect.deepEqual(back.sources, [{ id: 'main', dsn: 'postgres://u:p@h/db' }])
+  })
+  t('keeps SSH / SSL fields across a panel save', () => {
+    const config: DbhubConfig = {
+      port: 18080,
+      enabled: true,
+      sources: [{ id: 'main', dsn: 'postgres://u:p@h/db' }],
+    }
+    const preserved: PreservedFields = {
+      main: { ssh_host: 'bastion.example', ssh_port: 22, ssh_user: 'ops' },
+    }
+    const text = configToToml(config, preserved)
+    const back = toml.parse(text) as { sources: Array<Record<string, unknown>> }
+    expect.deepEqual(back.sources, [
+      {
+        id: 'main',
+        dsn: 'postgres://u:p@h/db',
+        ssh_host: 'bastion.example',
+        ssh_port: 22,
+        ssh_user: 'ops',
+      },
+    ])
+  })
+  t('drops preserved fields whose source id was removed', () => {
+    const config: DbhubConfig = {
+      port: 18080,
+      enabled: true,
+      sources: [], // user removed everything
+    }
+    const preserved: PreservedFields = { main: { ssh_host: 'bastion' } }
+    const text = configToToml(config, preserved)
+    const back = toml.parse(text) as { sources: Array<Record<string, unknown>> }
+    expect.deepEqual(back.sources, [])
+  })
+  t('drops preserved fields for ids that no longer exist (rename scenario)', () => {
+    // User renamed `main` to `primary` in the panel. The old id's
+    // preserved fields are NOT migrated — that's a deliberate choice:
+    // automatic migration could be wrong (collisions, multiple
+    // candidates), and a re-add is cheap.
+    const config: DbhubConfig = {
+      port: 18080,
+      enabled: true,
+      sources: [{ id: 'primary', dsn: 'postgres://u:p@h/db' }],
+    }
+    const preserved: PreservedFields = { main: { ssh_host: 'bastion' } }
+    const text = configToToml(config, preserved)
+    const back = toml.parse(text) as { sources: Array<Record<string, unknown>> }
+    expect.equal(back.sources.length, 1)
+    expect.equal(back.sources[0]?.id, 'primary')
+    expect.equal((back.sources[0] as Record<string, unknown>).ssh_host, undefined)
+  })
+  t('panel-written fields always win on conflict with preserved fields', () => {
+    const config: DbhubConfig = {
+      port: 18080,
+      enabled: true,
+      sources: [{ id: 'main', dsn: 'postgres://u:p@new/db' }],
+    }
+    const preserved: PreservedFields = { main: { dsn: 'postgres://u:p@old/db', ssh_host: 'bastion' } }
+    const text = configToToml(config, preserved)
+    const back = toml.parse(text) as { sources: Array<Record<string, unknown>> }
+    // Panel's dsn replaces the old one in the preserved bag (the
+    // panel owns id+dsn); the non-conflicting ssh_host is kept.
+    expect.equal(back.sources[0]?.dsn, 'postgres://u:p@new/db')
+    expect.equal(back.sources[0]?.ssh_host, 'bastion')
+  })
+  t('preserves nested TOML tables intact', () => {
+    const config: DbhubConfig = {
+      port: 18080,
+      enabled: true,
+      sources: [{ id: 'main', dsn: 'postgres://u:p@h/db' }],
+    }
+    const preserved: PreservedFields = {
+      main: { ssh: { host: 'bastion.example', port: 22 } },
+    }
+    const text = configToToml(config, preserved)
+    const back = toml.parse(text) as { sources: Array<Record<string, unknown>> }
+    expect.deepEqual(back.sources[0]?.ssh, { host: 'bastion.example', port: 22 })
+  })
+})
+
+describe('parsePreservedFields → configToToml round-trip', () => {
+  t('a hand-edited TOML survives a panel save unchanged on non-panel fields', () => {
+    // This is the realistic bug: user hand-adds ssh_* fields, then
+    // opens the panel, tweaks the DSN, and saves. The ssh_* fields
+    // must still be there.
+    const onDisk = [
+      '[[sources]]',
+      'id = "main"',
+      'dsn = "postgres://u:p@old/db"',
+      'ssh_host = "bastion.example"',
+      'ssh_user = "ops"',
+      'sslmode = "require"',
+    ].join('\n')
+    const preserved = parsePreservedFields(onDisk)
+    const newConfig: DbhubConfig = {
+      port: 18080,
+      enabled: true,
+      sources: [{ id: 'main', dsn: 'postgres://u:p@new/db' }],
+    }
+    const written = configToToml(newConfig, preserved)
+    const back = toml.parse(written) as { sources: Array<Record<string, unknown>> }
+    expect.deepEqual(back.sources, [
+      {
+        id: 'main',
+        dsn: 'postgres://u:p@new/db',
+        ssh_host: 'bastion.example',
+        ssh_user: 'ops',
+        sslmode: 'require',
+      },
+    ])
   })
 })
 

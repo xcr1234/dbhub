@@ -27,9 +27,10 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { homedir, platform } from 'node:os'
 import type { DbhubConfig, DbhubTool } from '../shared/types.ts'
 
 /** Options the host passes to dbhub via argv. */
@@ -56,10 +57,67 @@ interface ActiveServer {
 }
 
 const SIGTERM_GRACE_MS = 5_000
+/** Package name that identifies the dbhub monorepo's root package.json. */
+const DBHUB_PACKAGE_NAME = '@xcr1234/dbhub-fork'
+/** Hard-coded fallback paths tried last, on platforms where the
+ *  developer's monorepo lives at a known absolute location. */
+const KNOWN_DEV_WORKSPACES: Partial<Record<NodeJS.Platform, string[]>> = {
+  win32: ['E:/dev/dbhub/dist/index.js'],
+  // Unix-like: try the developer's monorepo at the canonical path,
+  // plus a few common alternatives. The caller still runs
+  // existsSync() — these are guesses that surface a clearer error
+  // than the previous single Windows-only fallback.
+  darwin: [
+    join(homedir(), 'IdeaProjects/dbhub/dist/index.js'),
+    join(homedir(), 'dev/dbhub/dist/index.js'),
+    join(homedir(), 'src/dbhub/dist/index.js'),
+  ],
+  linux: [
+    join(homedir(), 'IdeaProjects/dbhub/dist/index.js'),
+    join(homedir(), 'dev/dbhub/dist/index.js'),
+    join(homedir(), 'src/dbhub/dist/index.js'),
+  ],
+  freebsd: [join(homedir(), 'dev/dbhub/dist/index.js')],
+  openbsd: [join(homedir(), 'dev/dbhub/dist/index.js')],
+  sunos: [join(homedir(), 'dev/dbhub/dist/index.js')],
+  aix: [join(homedir(), 'dev/dbhub/dist/index.js')],
+}
 
 /**
- * Resolve the absolute path of the dbhub executable. Three sources,
- * in priority order:
+ * Walk up from `start` for `package.json` files whose `name` field
+ * equals the dbhub workspace marker. Returns the directory of the
+ * first match (so the caller can read `<dir>/dist/index.js`).
+ * Used by {@link resolveDbhubBin} to find a dev-monorepo build
+ * when the plugin is running from source or built into a sub-tree
+ * of the dbhub workspace.
+ */
+function findDbhubWorkspaceDir(start: string, maxDepth = 10): string | null {
+  let dir = start
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    const pkg = join(dir, 'package.json')
+    if (existsSync(pkg)) {
+      try {
+        const text = readFileSync(pkg, 'utf8')
+        // Cheap string match is enough: the marker is unique
+        // enough that false positives are vanishingly unlikely,
+        // and we don't want to drag a JSON parser into the
+        // startup path.
+        if (text.includes(`"name": "${DBHUB_PACKAGE_NAME}"`)) {
+          return dir
+        }
+      } catch {
+        // unreadable; keep walking
+      }
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return null
+}
+
+/**
+ * Resolve the absolute path of the dbhub executable. Sources, in order:
  *
  *  1. `process.env.DBHUB_BIN` — set by the dsh launcher (or a
  *     wrapper script) when the operator knows exactly which build
@@ -67,30 +125,48 @@ const SIGTERM_GRACE_MS = 5_000
  *  2. `<plugin>/node_modules/@xcr1234/dbhub-fork/dist/index.js` —
  *     the package was installed alongside this plugin (the common
  *     local-dev case).
- *  3. Hard-coded workspace path on the developer's machine. Lets
- *     a freshly-built dbhub be picked up without an `npm install`
- *     round-trip.
+ *  3. Walk up from this file's location looking for a `package.json`
+ *     whose `name` is `@xcr1234/dbhub-fork`; if found, use its
+ *     sibling `dist/index.js`. Catches the dev case where the
+ *     plugin source lives inside the dbhub monorepo and there's a
+ *     fresh build next to it.
+ *  4. Platform-specific known dev workspaces (Windows-only fallback
+ *     historically; now also tries a couple of macOS / Linux
+ *     paths). The caller runs `existsSync()` and surfaces a clear
+ *     error when none of these resolve.
  */
 export function resolveDbhubBin(): string {
   const env = process.env.DBHUB_BIN
   if (typeof env === 'string' && env.length > 0 && existsSync(env)) {
     return resolve(env)
   }
-  // 2: walk up from this file's compiled location to the plugin
-  // root, then look for the optional bundled dbhub.
-  // For the host bundle, runtime.js sits under `<plugin>/lib/`,
-  // so the plugin root is one level up.
   const here = import.meta.dirname
     ? import.meta.dirname
     : dirname(fileURLToPath(import.meta.url))
+
+  // 2: walk up from this file looking for the bundled install.
   for (let dir = here; ; dir = dirname(dir)) {
-    const candidate = resolve(dir, 'node_modules/@xcr1234/dbhub-fork/dist/index.js')
+    const candidate = join(dir, 'node_modules/@xcr1234/dbhub-fork/dist/index.js')
     if (existsSync(candidate)) return candidate
     if (dirname(dir) === dir) break
   }
-  // 3: hard-coded workspace fallback. Keep in sync with the
-  // dbhub project's `dist/index.js` output.
-  return resolve('E:/dev/dbhub/dist/index.js')
+
+  // 3: walk up looking for the dbhub workspace marker (dev case).
+  const workspaceDir = findDbhubWorkspaceDir(here)
+  if (workspaceDir !== null) {
+    const built = join(workspaceDir, 'dist', 'index.js')
+    if (existsSync(built)) return built
+  }
+
+  // 4: platform-specific fallbacks.
+  for (const candidate of KNOWN_DEV_WORKSPACES[platform()] ?? []) {
+    if (existsSync(candidate)) return candidate
+  }
+  // Last-resort return value: the caller will fail with a clear
+  // error that names every path it tried. We return the first
+  // platform guess so the message is at least sensible on the
+  // current OS.
+  return (KNOWN_DEV_WORKSPACES[platform()] ?? [])[0] ?? join(homedir(), 'dbhub', 'dist', 'index.js')
 }
 
 /**

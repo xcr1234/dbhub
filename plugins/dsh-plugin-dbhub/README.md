@@ -125,6 +125,32 @@ DSH 把插件当作一个 `cordis:include` row 加载。包声明了
 dbhub 读它的 TOML。模型两个都不读——它看到的是 `dsh-mcp-client`
 暴露的 MCP 工具。
 
+#### 真相来源 vs. 产物（容易踩的坑）
+
+`dbhub.toml` **不是配置，它是面板→插件→dbhub 这条链路上的产物**。
+数据流是单向的：
+
+```
+面板编辑 ──▶ settings.yaml  ──▶ 插件 onChange ──▶ dbhub.toml  ──▶ dbhub 子进程
+              (DSH 写入)         (writeToml)        (fs.watch)
+```
+
+后果：
+
+- **`id` 和 `dsn` 由面板拥有。** 你在 `dbhub.toml` 里手改这两个字段
+  不会流回 `settings.yaml`，下次面板保存会被面板的值覆盖。如果想改
+  连接身份，走面板或者改 `settings.yaml`。
+- **其它字段（`ssh_host` / `sslmode` / `query_timeout` / `[[tools]]`）
+  会被插件保留。** `host/settings.ts` 的 `writeToml` 在写盘前会先
+  `readFileSync` 上一份 TOML，按 source id 抽出所有非 `id`/`dsn` 字段
+  （`shared/toml.ts` 的 `parsePreservedFields`），合并进新的输出。
+  你在 `dbhub.toml` 里加的 SSH 隧道在面板改 dsn 之后还会留着。
+- **不要把 `dbhub.toml` 当配置来管理。** 删了它下次启动会被插件按
+  `settings.yaml` 重建。如果想真的清空某个连接，走面板「移除」+
+  保存，或编辑 `settings.yaml` 把对应 `sources` 条目删掉。
+- **多 profile 共用一份 `dbhub.toml`（手动设了 `DBHUB_TOML_PATH` 到
+  共享路径）是反模式。** 后写覆盖先写，没有合并语义。
+
 ---
 
 ## 4. 为何实现长这样
@@ -175,10 +201,14 @@ Windows 的 `fs.rename` 不会覆盖已存在的目标文件。我们先删目�
 
 ### 4.5 为什么通过 `dbhub/listTools` 暴露工具，不重读 `dbhub.toml`
 
-`dbhub.toml` 往返只保留 `id` + `dsn`。其它（SSH、SSL、自定义工具）
-用户手编辑的内容每次保存都会丢失。我们让 dbhub 自己通过
-`fetch /api/sources` 告诉插件它的实时工具清单。那个端点返回扁平
-的 `{ id, tools: [{ name, description, readonly }] }`。
+`dbhub.toml` 在产物侧只关心 `id` + `dsn`，但 **写盘时** 会先
+`parsePreservedFields` 把上一份 TOML 里每个 source 的未知字段（SSH、
+SSL、`query_timeout`、`[[tools]]` …）按 id 抽出，合并进新输出；只有
+`id` 和 `dsn` 永远由面板拥有。所以面板保存能保住用户手编辑的高级
+字段，但 id/dsn 本身的修改只能从面板或 `settings.yaml` 来。
+
+工具清单本身走 dbhub 的 `fetch /api/sources` 实时拿——那个端点返回扁平的
+`{ id, tools: [{ name, description, readonly }] }`。
 
 fetch 有 3s `AbortController` 超时，失败时静默返回 `[]`——从不抛，
 因为面板把空当作"暂无工具"（dbhub 正在启动中），不是错误。
@@ -316,10 +346,11 @@ pnpm install E:\dev\dbhub\plugins\dsh-plugin-dbhub
 `C:\Users\xcr_1\.dsh\profiles\web\dbhub.toml`）。用
 `DBHUB_TOML_PATH=<完整路径>` 覆盖到其它位置。
 
-高级选项（SSH、SSL、`query_timeout`、自定义工具）面板不暴露。
-手编辑 `dbhub.toml`；dbhub 自己的 watcher 保存时重载，插件的
-`tomlToConfig` 往返保留 `[[sources]]` row 上任何不是 `id` 或 `dsn`
-的字段。
+高级选项（SSH、SSL、`query_timeout`、自定义工具）面板不暴露，
+直接编辑 `dbhub.toml`。dbhub 的 watcher（500ms 防抖）保存时重载。
+
+写在 `dbhub.toml` 里的非 `id`/`dsn` 字段 **会被插件保留**：见 §3.2。
+`id` 和 `dsn` 是面板的字段，要改走面板或 `settings.yaml`。
 
 ---
 

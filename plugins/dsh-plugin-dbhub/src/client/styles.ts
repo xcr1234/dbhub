@@ -37,11 +37,13 @@ export const C = {
   btnDanger: 'dshdb-btn-danger',
   rowActions: 'dshdb-row-actions',
   field: 'dshdb-field',
+  fieldRow: 'dshdb-field-row',
   label: 'dshdb-label',
   hint: 'dshdb-hint',
   input: 'dshdb-input',
   select: 'dshdb-select',
   checkbox: 'dshdb-checkbox',
+  dsnPreview: 'dshdb-dsn-preview',
   error: 'dshdb-error',
   empty: 'dshdb-empty',
   editor: 'dshdb-editor',
@@ -85,12 +87,15 @@ const css = `
 .dshdb-btn-danger{color:var(--dsw-alias-state-error-primary)}
 .dshdb-row-actions{display:flex;align-items:center;gap:6px;flex:none}
 .dshdb-field{display:flex;flex-direction:column;gap:4px}
+.dshdb-field-row{display:flex;gap:8px;align-items:flex-start}
+.dshdb-field-row .dshdb-field{flex:1;min-width:0}
 .dshdb-label{color:var(--dsw-alias-label-caption);font-size:11px;line-height:16px}
 .dshdb-hint{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}
 .dshdb-input,.dshdb-select{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);font:inherit;border-radius:7px;padding:5px 8px;width:100%;font-size:12px;line-height:18px}
 .dshdb-input{font-family:var(--dsh-font-mono,monospace)}
 .dshdb-checkbox{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .dshdb-checkbox input{accent-color:var(--dsw-alias-button-primary-fill)}
+.dshdb-dsn-preview{display:block;box-sizing:border-box;border:1px dashed var(--dsw-alias-border-l2);background:var(--dsw-alias-button-ghost-active-fill);color:var(--dsw-alias-label-secondary);font-family:var(--dsh-font-mono,monospace);font-size:11px;line-height:16px;border-radius:7px;padding:6px 8px;word-break:break-all;white-space:pre-wrap;min-height:18px}
 .dshdb-error{color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-interactive-bg-hover-danger);border-radius:8px;padding:6px 10px;font-size:11px;line-height:16px}
 .dshdb-empty{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;text-align:center;padding:28px 12px;display:flex;flex-direction:column;gap:4px;align-items:center}
 .dshdb-editor{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);border-radius:12px;overflow:hidden}
