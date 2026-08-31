@@ -96,6 +96,30 @@ describe("startConfigWatcher", () => {
     });
   });
 
+  // Atomic-replace writers (write tmp, unlink target, rename tmp ->
+  // target) emit `rename` events on macOS/Linux fs.watch — never
+  // `change`. Without treating `rename` as a reload signal, the new
+  // config slips past the watcher and the user's edit only takes
+  // effect after a manual restart.
+  it("should also reload on a rename event (atomic-replace writers)", async () => {
+    vi.mocked(resolveTomlConfigPath).mockReturnValue("/path/to/dbhub.toml");
+    const newConfig = {
+      sources: [{ id: "renamed_db", type: "sqlite" as const, dsn: "sqlite:///:memory:" }],
+      tools: [],
+      source: "dbhub.toml",
+    };
+    vi.mocked(loadTomlConfig).mockReturnValue(newConfig);
+    const mockManager = createMockManager();
+
+    startConfigWatcher(createOptions(mockManager));
+    watchCallback("rename");
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(loadTomlConfig).toHaveBeenCalled();
+    expect(mockManager.connectWithSources).toHaveBeenCalledWith(newConfig.sources);
+  });
+
   it("should debounce rapid file changes", async () => {
     vi.mocked(resolveTomlConfigPath).mockReturnValue("/path/to/dbhub.toml");
     vi.mocked(loadTomlConfig).mockReturnValue({

@@ -105,8 +105,21 @@ export function startConfigWatcher(options: ConfigWatcherOptions): (() => void) 
     }
   };
 
+  // Reload on BOTH `change` and `rename` events.
+  //
+  // `change` covers in-place writes (most editors, `writeFileSync`
+  // directly to the target).
+  //
+  // `rename` covers atomic-replace strategies (write to a sibling
+  // tmp, then `rename` over the target — the watcher's unlink + rename
+  // shows up as `rename` on macOS/Linux, never `change`). Without
+  // this, any writer using tmp + rename would slip past the watcher
+  // and the new config would only take effect after a manual restart.
+  // The DSH dbhub plugin uses that strategy on Windows (where
+  // `fs.rename` refuses to overwrite) and used to on POSIX too — both
+  // cases now trigger a reload.
   const watcher = fs.watch(configPath, (eventType) => {
-    if (eventType === "change") {
+    if (eventType === "change" || eventType === "rename") {
       scheduleReload();
     }
   });
