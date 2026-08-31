@@ -164,6 +164,36 @@ export const dbhubViewSchema = z.object({
   tools: dbhubToolListSchema,
 })
 
+/**
+ * The Connection-RPC channel the host registers and the client calls.
+ * Mirrors dsh-mcp-manager's `RPC_CHANNEL` pattern: a single string
+ * identifying a private namespace under which the host's `handle()`
+ * listens for endpoint calls and the client's `call()` invokes them.
+ *
+ * The leading `/` follows the same convention dsh uses for internal
+ * channels; collisions across plugins are vanishingly unlikely because
+ * each plugin picks its own namespace.
+ */
+export const RPC_CHANNEL = '/dbhub'
+
+/**
+ * RPC endpoint names understood by the host channel handler. Each
+ * endpoint maps to one method on `DbhubService`; the host's dispatch
+ * function is a single `switch` over this union.
+ */
+export type DbhubEndpoint = 'list' | 'listTools' | 'save' | 'testConnection'
+
+/**
+ * Reply envelope for every endpoint. Success carries the typed
+ * payload in `value`; failure carries a structured error object the
+ * client can render directly without re-throwing.
+ *
+ * Mirrors the `RpcResult` shape dsh's Connection RPC channel uses.
+ */
+export type DbhubRpcResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: { code: string; message: string; details?: Record<string, unknown> } }
+
 /** DSN prefix → connector type. Mirrors dbhub's getDatabaseTypeFromDSN. */
 export function inferDbType(dsn: string): 'postgres' | 'mysql' | 'mariadb' | 'sqlserver' | 'sqlite' | 'oracle' | null {
   const match = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.exec(dsn)

@@ -10,21 +10,19 @@ import { defineConfig } from 'tsup'
  * runtime JSX transformer.
  */
 export default defineConfig({
-  entry: { index: 'src/index.ts', typert: 'src/typert.ts' },
+  entry: { index: 'src/index.ts' },
   format: ['esm'],
   dts: true,
   outDir: 'lib',
   target: 'node20',
   sourcemap: true,
   clean: true,
-  // The host already provides react / dom / zod through its loader
-  // composition. @iarna/toml and the typert zod codecs pass through
-  // the host at registration time. `@deepseek-ai/dsh-typert-protocol`
-  // is bundled into the host (rather than treated as a bare import)
-  // so the `TypertRemoteService` class the plugin extends, and the
-  // `Remote` decorator, share the same `markers` WeakMap as the
-  // dsh-web gateway's lookup. Two instances of the package would
-  // otherwise fail the `markers.get(prototype)` check and the
-  // gateway would not see the `@Remote`-marked methods.
+  // The host dsh profile provides react / dom / zod through its
+  // loader composition. @iarna/toml and the dsh-settings namespace
+  // registration pass through the host at apply() time.
+  // `@deepseek-ai/dsh-client-connection` is a peer dep (provided by
+  // the host at runtime); the previous `@deepseek-ai/dsh-typert-protocol`
+  // runtime dep was retired when the plugin migrated to
+  // `ctx.connection.rpc` — see README §6 for the rationale.
   external: ['react', 'react-dom', 'react/jsx-runtime', '@iarna/toml', 'zod'],
 })

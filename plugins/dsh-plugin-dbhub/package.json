@@ -1,6 +1,6 @@
 {
   "name": "@xcr1234/dsh-plugin-dbhub",
-  "version": "1.0.0",
+  "version": "1.1.0-beta.0",
   "description": "DSH plugin: manage dbhub database MCP servers from the settings panel; starts dbhub in-process (no npx) and exposes its tools via dsh-mcp-client.",
   "type": "module",
   "license": "MIT",
@@ -35,10 +35,6 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./typert": {
-      "types": "./lib/typert.d.ts",
-      "default": "./lib/typert.js"
-    },
     "./client": "./client/client.js",
     "./src/*": "./src/*",
     "./package.json": "./package.json"
@@ -64,6 +60,7 @@
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-api-remotes"
       ],
       "platform": "web"
@@ -81,6 +78,7 @@
     "prepack": "pnpm run build"
   },
   "peerDependencies": {
+    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "zod": "^4.0.0"
@@ -96,7 +94,6 @@
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.0.0",
     "@iarna/toml": "^2.2.5",
     "@xcr1234/dbhub-fork": "workspace:^1.10.0"

@@ -4,11 +4,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import {
   inferDbType,
   type DbhubConfig,
   type DbhubSource,
-  type DbhubTestInput,
   type DbhubTestResult,
   type DbhubTool,
   type DbhubView,
@@ -26,26 +26,21 @@ import {
   type SqliteDsnFields,
 } from '../shared/dsn.ts'
 import { C } from './styles.ts'
+import { callRpc } from './rpc.ts'
 
 /** Locale namespace owned by this plugin; matches `client/index.ts`. */
 const NS = 'dbhub'
 
 type T = (key: keyof typeof import('./locales.ts').zh, vars?: Record<string, string>) => string
 
-export interface DbhubRemote {
-  list(): Promise<{ ok: true; value: DbhubView } | { ok: false; error: Error }>
-  listTools(): Promise<{ ok: true; value: DbhubTool[] } | { ok: false; error: Error }>
-  save(
-    input: DbhubConfig,
-  ): Promise<{ ok: true; value: DbhubView } | { ok: false; error: Error }>
-  testConnection(
-    input: DbhubTestInput,
-  ): Promise<{ ok: true; value: DbhubTestResult } | { ok: false; error: Error }>
-}
-
 export interface DbhubSettingsSectionProps {
+  /**
+   * DSH client root context. The panel talks to the host through
+   * `ctx.connection.rpc.call('/dbhub', endpoint, payload)`; see
+   * `./rpc.ts` for the thin wrapper used everywhere below.
+   */
+  ctx: ClientContext
   t: T
-  dbhub: DbhubRemote
 }
 
 /**
@@ -199,7 +194,7 @@ function fieldsForTypeChange(prev: DraftSource, nextType: DbType): DsnFields {
 
 export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.ReactElement {
   const t = props.t
-  const remote = props.dbhub
+  const ctx = props.ctx
   const [view, setView] = useState<DbhubView | null>(null)
   const [draft, setDraft] = useState<DbhubConfig | null>(null)
   const [editing, setEditing] = useState<DraftSource | null>(null)
@@ -227,15 +222,15 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
   const [lastTestedDsn, setLastTestedDsn] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    const result = await remote.list()
-    if (result.ok) {
-      setView(result.value)
-      setDraft((prev) => (prev === null ? result.value.config : prev))
+    try {
+      const value = await callRpc<DbhubView>(ctx, 'list')
+      setView(value)
+      setDraft((prev) => (prev === null ? value.config : prev))
       setLoadError(null)
-    } else {
-      setLoadError(t('error.load', { message: result.error.message }))
+    } catch (err) {
+      setLoadError(t('error.load', { message: err instanceof Error ? err.message : String(err) }))
     }
-  }, [remote, t])
+  }, [ctx, t])
 
   useEffect(() => {
     void refresh()
@@ -259,13 +254,13 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
     setSaved(false)
     // eslint-disable-next-line no-console
     console.warn(`[dbhub-panel] save click: sources=${String(draft.sources.length)} port=${String(draft.port)}`)
-    const result = await remote.save(draft)
-    setSaving(false)
-    // eslint-disable-next-line no-console
-    console.warn(`[dbhub-panel] save result: ${result.ok ? 'ok' : 'error: ' + result.error.message}`)
-    if (result.ok) {
-      setView(result.value)
-      setDraft(result.value.config)
+    try {
+      const value = await callRpc<DbhubView>(ctx, 'save', draft)
+      setSaving(false)
+      // eslint-disable-next-line no-console
+      console.warn('[dbhub-panel] save result: ok')
+      setView(value)
+      setDraft(value.config)
       setSaved(true)
       window.setTimeout(() => setSaved(false), 2000)
       // dbhub's fs.watch has a 500 ms debounce before it begins a
@@ -275,16 +270,19 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
       // the freshly registered set rather than the pre-reload
       // snapshot the `save` response carried.
       window.setTimeout(() => {
-        void remote.listTools().then((toolsResult) => {
-          if (toolsResult.ok) {
-            setView((prev) => (prev === null ? prev : { ...prev, tools: toolsResult.value }))
-          }
+        void callRpc<DbhubTool[]>(ctx, 'listTools').then((tools) => {
+          setView((prev) => (prev === null ? prev : { ...prev, tools }))
+        }).catch(() => {
+          // Best-effort refresh; ignore failure here.
         })
       }, 1500)
-    } else {
-      setSaveError(t('error.save', { message: result.error.message }))
+    } catch (err) {
+      setSaving(false)
+      // eslint-disable-next-line no-console
+      console.warn(`[dbhub-panel] save error: ${err instanceof Error ? err.message : String(err)}`)
+      setSaveError(t('error.save', { message: err instanceof Error ? err.message : String(err) }))
     }
-  }, [draft, remote, t])
+  }, [draft, ctx, t])
 
   const onDiscard = useCallback(() => {
     if (view === null) return
@@ -310,24 +308,26 @@ export function DbhubSettingsSection(props: DbhubSettingsSectionProps): React.Re
     if (dsn.length === 0) return
     setTesting(true)
     setTestResult(null)
-    const result = await remote.testConnection({ dsn })
-    setTesting(false)
-    if (result.ok) {
-      setTestResult(result.value)
-    } else {
-      // Wrap the wire-level failure as a structured DbhubTestResult so
-      // the chip renders the same shape — never re-throw, the panel
-      // treats everything from this endpoint as a renderable outcome.
+    try {
+      const value = await callRpc<DbhubTestResult>(ctx, 'testConnection', { dsn })
+      setTestResult(value)
+    } catch (err) {
+      // Protocol-level failure (RPC envelope said "no"). The
+      // business-level DbhubTestResult already has its own ok/error
+      // fields, so wrap a synthetic failure that the chip can render
+      // in the same shape as a failed probe.
       setTestResult({
         ok: false,
         latencyMs: 0,
         dbType: null,
         serverVersion: null,
-        error: result.error.message,
+        error: err instanceof Error ? err.message : String(err),
       })
+    } finally {
+      setTesting(false)
     }
     setLastTestedDsn(dsn)
-  }, [editing, remote])
+  }, [editing, ctx])
 
   const onAdd = useCallback(() => {
     setEditing(newDraft())

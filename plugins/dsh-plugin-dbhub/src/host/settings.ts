@@ -1,10 +1,12 @@
 /**
- * Settings namespace ownership and the `ctx.dbhub` typert service.
+ * Settings namespace ownership and the host-side `dbhub` service.
  *
  * Owns:
  *  - the `dbhub` settings namespace (schema + watcher)
- *  - the `dbhub/list` / `dbhub/save` host service methods the panel
- *    calls through TYPERT
+ *  - the `list` / `listTools` / `save` / `testConnection` service methods
+ *    the panel calls through the Connection RPC channel registered
+ *    in `src/index.ts` (mirrors dsh-mcp-manager's `ctx.connection.rpc.handle`
+ *    pattern)
  *  - the lifecycle for the in-process dbhub server and the on-disk
  *    dbhub.toml that backs it
  *
@@ -14,18 +16,22 @@
  * defaults, fiber-scoped disposal, schema-declared `applies`). The
  * write side is just `ctx.settings.replace(ns, section)`.
  *
+ * The class extends Cordis `Service` directly (not the old
+ * `@deepseek-ai/dsh-typert-protocol`'s `TypertRemoteService`) because
+ * the old `@Remote` decorator path required both sides to load the
+ * exact same module instance of that package — which only worked via
+ * a source-tree bridge that broke for npm-distributed consumers. The
+ * Connection RPC path needs no module-instance sharing, so the class
+ * can be a plain Cordis Service and stay agnostic of any internal
+ * dsh monorepo package.
+ *
  * @module @xcr1234/dsh-plugin-dbhub/host
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { type Context } from '@deepseek-ai/cordis'
-// See `../typert-bridge.js` for the full rationale: the plugin and
-// dsh-web must share the SAME module instance of
-// `@deepseek-ai/dsh-typert-protocol` for the `@Remote` marker
-// WeakMap to be visible to the typert gateway.
-import { Remote, TypertRemoteService } from '../typert-bridge.js'
+import { Service, type Context } from '@deepseek-ai/cordis'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { dbhubConfigSchema, type DbhubConfig, type DbhubTestInput, type DbhubTestResult, type DbhubTool, type DbhubView } from '../shared/types.ts'
 import { assertValidDsn, configToToml, parsePreservedFields, type PreservedFields } from '../shared/toml.ts'
@@ -45,14 +51,13 @@ const NS = settingsNamespace('dbhub')
 export type DbhubServiceCommitHook = (view: DbhubView) => void | Promise<void>
 
 /**
- * Host service exposed at `ctx.dbhub`. Inheriting
- * {@link TypertRemoteService} binds the same key to the typert
- * gateway so the panel's `dbhub/list` and `dbhub/save` calls
- * dispatch here directly, with the strict codecs declared in
- * `typert.ts`. Methods marked `@Remote` are the gateway's
- * source-mode discovery targets.
+ * Host service exposed at `ctx.dbhub`. Plain Cordis `Service`; the RPC
+ * dispatch in `./rpc.ts` reaches its methods by reference. No
+ * decorator discovery is involved, so the service works equally well
+ * when shipped via npm (where there's no deepseek-harness source
+ * checkout to bridge to).
  */
-export class DbhubService extends TypertRemoteService {
+export class DbhubService extends Service {
   private currentConfig: DbhubConfig = DEFAULT_CONFIG
   private readonly runtime = new DbhubRuntime()
 
@@ -72,8 +77,7 @@ export class DbhubService extends TypertRemoteService {
     return resolveConfigPath(loader)
   }
 
-  /** TYPERT: read the current view. */
-  @Remote
+  /** RPC endpoint: read the current view. */
   async list(): Promise<DbhubView> {
     return {
       config: this.currentConfig,
@@ -84,16 +88,15 @@ export class DbhubService extends TypertRemoteService {
     }
   }
 
-  /** TYPERT: read just the live tool inventory (faster than full list). */
-  @Remote
+  /** RPC endpoint: read just the live tool inventory (faster than full list). */
   async listTools(): Promise<DbhubTool[]> {
     return this.runtime.listTools()
   }
 
   /**
-   * TYPERT: run a one-shot connectivity probe against `input.dsn`. Forwards
-   * to dbhub's `--test-dsn` CLI via a dedicated child process — the
-   * long-running MCP server is never disturbed, so this works for
+   * RPC endpoint: run a one-shot connectivity probe against `input.dsn`.
+   * Forwards to dbhub's `--test-dsn` CLI via a dedicated child process —
+   * the long-running MCP server is never disturbed, so this works for
    * un-saved DSNs and doesn't pollute the connection pool.
    *
    * Validates the DSN shape before spawning so blatantly bad input
@@ -101,7 +104,6 @@ export class DbhubService extends TypertRemoteService {
    * everything else (DNS, TCP, auth, SSL) is caught inside the child
    * and surfaced as a structured `{ok:false, error}` result.
    */
-  @Remote
   async testConnection(input: DbhubTestInput): Promise<DbhubTestResult> {
     // `assertValidDsn` throws on unknown protocol. The error message
     // is already user-friendly thanks to `shared/toml.ts`.
@@ -110,12 +112,11 @@ export class DbhubService extends TypertRemoteService {
   }
 
   /**
-   * TYPERT: persist a new config, rewrite dbhub.toml, reconcile the
+   * RPC endpoint: persist a new config, rewrite dbhub.toml, reconcile the
    * in-process server, and return the new view. Validates DSNs and
    * source-id uniqueness BEFORE writing; a malformed input rejects
    * without touching the file.
    */
-  @Remote
   async save(input: DbhubConfig): Promise<DbhubView> {
     console.warn(`[dbhub] save called with ${input.sources.length} source(s), enabled=${String(input.enabled)}, port=${String(input.port)}`)
     for (const s of input.sources) {

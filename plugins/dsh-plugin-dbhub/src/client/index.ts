@@ -1,27 +1,32 @@
 /**
- * Client plugin body: registers the locale dictionaries, mounts the
- * `dbhub` typert remote, then injects the React settings page into
- * the `settings.section` slot.
+ * Client plugin body: registers the locale dictionaries, injects the
+ * stylesheet, then injects the React settings page into the
+ * `settings.section` slot.
  *
- * The host client wraps this file in a `window.__ModuleLoader__.load`
- * factory at build time, so the source shape is the same as every
- * other browser plugin in the dsh ecosystem.
+ * The host wraps this file in a `window.__ModuleLoader__.load` factory
+ * at build time, so the source shape is the same as every other
+ * browser plugin in the dsh ecosystem.
  *
  * @module @xcr1234/dsh-plugin-dbhub/client
  */
 
-import { DbhubSettingsSection, type DbhubRemote } from './DbhubSettingsSection.tsx'
+import { DbhubSettingsSection } from './DbhubSettingsSection.tsx'
 import { en, zh } from './locales.ts'
 import { injectStyles } from './styles.ts'
-import { TYPERT_REMOTE } from './typert-remote.ts'
 
 /** Dictionary namespace owned by this plugin (settings page copy). */
 const NS = 'dbhub'
 
 /**
  * The Cordis-style client apply function. Invoked by dsh-web with a
- * `ctx` object exposing `slots`, `remote`, `locale`, and `effect` —
- * the same surface every browser plugin consumes.
+ * `ctx` object exposing `slots`, `connection`, `locale`, and `effect`
+ * — the same surface every browser plugin consumes.
+ *
+ * We no longer mount a TYPERT_REMOTE manifest (the old bridge-based
+ * `@Remote` decorator path was retired — see `../index.ts` for the
+ * full rationale). The panel talks to the host directly through
+ * `ctx.connection.rpc.call('/dbhub', endpoint, payload)` via
+ * `./rpc.ts`.
  */
 export async function apply(ctx: {
   effect: (fn: () => unknown | (() => void), label?: string) => () => void
@@ -29,7 +34,7 @@ export async function apply(ctx: {
     register(ns: string, dict: { zh: unknown; en: unknown }): void
     bind(ns: string): (key: string, vars?: Record<string, string>) => string
   }
-  remote: { $mount(remote: typeof TYPERT_REMOTE): Promise<unknown> }
+  connection: { rpc: { call: (channel: string, endpoint: string, payload: unknown) => Promise<unknown> } }
   slots: {
     inject(slotName: string, register: () => unknown): void
     register: (descriptor: unknown, component: unknown) => unknown
@@ -38,12 +43,7 @@ export async function apply(ctx: {
 }): Promise<void> {
   injectStyles()
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dbhub:dictionaries')
-  await ctx.remote.$mount(TYPERT_REMOTE)
   const t = ctx.locale.bind(NS)
-  const remote = ctx.get('remote.dbhub') as DbhubRemote | undefined
-  if (!remote) {
-    throw new Error('dbhub client: remote.dbhub is not available after $mount')
-  }
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(
       {
@@ -52,15 +52,19 @@ export async function apply(ctx: {
         order: 40,
         label: () => t('nav'),
         locale: NS,
-        inject: () => ({ dbhub: remote }),
+        // Inject the full ctx so the panel can call into
+        // `ctx.connection.rpc` directly. Mirrors dsh-mcp-manager's
+        // `inject: () => ({ ctx })` — keeping the same shape keeps
+        // every panel in the dsh ecosystem feeling familiar.
+        inject: () => ({ ctx }),
       },
       DbhubSettingsSection,
     ),
   )
 }
 
-/** Stable cordis plugin name (used by client diagnostics). */
+/** Stable cordis plugin name (used for client diagnostics). */
 export const name = 'dbhub'
 
 /** Services required before this plugin mounts. */
-export const inject = ['slots', 'remote', 'locale']
+export const inject = ['slots', 'connection', 'locale']

@@ -17,25 +17,25 @@ plugins/dsh-plugin-dbhub/
 ├── scripts/
 │   └── build-client.mjs      # esbuild CJS -> __ModuleLoader__ factory 包装
 ├── src/
-│   ├── index.ts              # host apply() 入口
-│   ├── typert.ts             # host TYPERT manifest (dbhub/list, save, listTools)
-│   ├── typert-bridge.ts      # 强制 deepseek-harness typert-protocol identity
+│   ├── index.ts              # host apply() 入口（注册 Connection RPC + mcp-client row）
 │   ├── host/
-│   │   ├── settings.ts       # ctx.dbhub service + settings section + onCommit
+│   │   ├── settings.ts       # ctx.dbhub Service + settings section + onCommit
 │   │   ├── runtime.ts        # dbhub 子进程生命周期 + /api/sources 探针
-│   │   └── config-file.ts    # profile-dir 发现 + dbhub.toml 路径
+│   │   ├── config-file.ts    # profile-dir 发现 + dbhub.toml 路径
+│   │   └── rpc.ts            # /dbhub channel dispatch (list/listTools/save/testConnection)
 │   ├── client/               # 浏览器半
-│   │   ├── index.ts          # client plugin body
-│   │   ├── DbhubSettingsSection.tsx   # 设置页（React）
-│   │   ├── typert-remote.ts  # 客户端 TYPERT manifest（typert.ts 的镜像）
+│   │   ├── index.ts          # client plugin body（inject ctx，不挂载 TYPERT_REMOTE）
+│   │   ├── DbhubSettingsSection.tsx   # 设置页（React），通过 ctx.connection.rpc 调 host
+│   │   ├── rpc.ts            # callRpc<T>() 封装 + DbhubRpcError
 │   │   ├── locales.ts        # zh + en 字典
 │   │   └── styles.ts         # 主题相关 CSS（data-plugin-css 注入）
 │   └── shared/
-│       ├── types.ts          # zod wire schemas + DbhubConfig/Tool/View
+│       ├── types.ts          # wire types + DbhubConfig/Tool/View + RPC envelope
 │       └── toml.ts           # configToToml / tomlToConfig / inferDbType
 ├── tests/
 │   ├── runner.mjs            # 入口，代理到 tests/run-tests.ts
 │   ├── run-tests.ts          # node:assert 测试框架（无 vitest / esbuild spawn）
+│   ├── dsn.test.ts           # DSN 解析/组装往返
 │   └── toml.test.ts          # 往返 + schema 验证
 ├── README.md (本文档英文版)
 ├── README.zh.md (本文)
@@ -44,23 +44,25 @@ plugins/dsh-plugin-dbhub/
 ```
 
 **构建产物（gitignored，由 `pnpm build` 重新生成）**：`lib/index.js`、
-`lib/typert.js`、`lib/*.d.ts`、`client/client.js`、
-`client/client.js.map`。
+`lib/*.d.ts`、`client/client.js`、`client/client.js.map`。
 
 ---
 
 ## 2. 它在 DSH 里的位置
 
 DSH 把插件当作一个 `cordis:include` row 加载。包声明了
-`dsh.client`（浏览器半），并导出一个 typert manifest（host
-半）；dsh-host plugin inventory 和 dsh-typert-loader 会自动识别两者。
+`dsh.client`（浏览器半），host 半在 `apply()` 里注册一个 Connection
+RPC 通道（`/dbhub`）和 `dsh-mcp-client` row；dsh-host plugin
+inventory 自动发现前者，dsh 的 `Connection RPC` 服务自动发现后者。
 
 ```
                   ┌──────────────────────────────────────────────┐
-                  │  dsh web 进程 (E:\dev\deepseek-harness)      │
+                  │  dsh web 进程（任意 dsh 安装）               │
                   │                                              │
-  用户面板  ◀──▶│  typert gateway  ──▶ ctx.dbhub.save()       │
-       点击     │                     (host service)        │
+  用户面板  ◀──▶│  ctx.connection.rpc.call('/dbhub', ...)│
+       点击     │           │                              │
+                  │           ▼                              │
+                  │  ctx.dbhub.save() (host service)         │
                   │           │                              │
                   │           ▼                              │
                   │  settings.replace(ns, section)             │
@@ -93,8 +95,8 @@ DSH 把插件当作一个 `cordis:include` row 加载。包声明了
 ### 3.1 用户在面板编辑连接
 
 1. `DbhubSettingsSection.tsx` 维护一个本地 `draft`（用户编辑中的配置）。
-2. 点**保存** → `onSave` 调 `remote.save(draft)`（TYPERT） → 走 wire
-   → `dbhub/save` host 方法。
+2. 点**保存** → `onSave` 调 `callRpc<DbhubView>(ctx, 'save', draft)`
+   （Connection RPC） → 走 `/dbhub` 通道 → `DbhubService.save`。
 3. `DbhubService.save` 校验 DSN，断言 source id 唯一，然后
    `ctx.settings.replace('dbhub', section)`。
 4. settings commit 触发 `installSettingsSection` 注册的 watcher。
@@ -168,23 +170,30 @@ spawn `resolveDbhubBin()`（env 覆盖 `DBHUB_BIN`，再
 `E:/dev/dbhub/dist/index.js`）。子进程 SIGTERM 杀掉（5s 宽限，
 再 SIGKILL）。日志加 `[dbhub:<port>]` 前缀。
 
-### 4.2 `src/typert-bridge.ts` 存在的原因
+### 4.2 通讯机制：Connection RPC（不是 TYPERT）
 
-`@deepseek-ai/dsh-typert-protocol` 是 **deepseek-harness monorepo
-内部包**，没有以可用形式发到 npm。插件的 `@Remote()` 装饰器把
-marker 记录写到那个包的模块级 WeakMap 里。dsh-web 的 typert gateway
-读同一个 map 来发现标记的方法。
+面板通过 `ctx.connection.rpc.call('/dbhub', endpoint, payload)`
+调 host 端点（host 在 `apply()` 里 `ctx.connection.rpc.handle(...)`
+注册）。这是 dsh 的官方 plugin-to-host 通讯机制，**不依赖**
+`@deepseek-ai/dsh-typert-protocol` 那个 monorepo 内部包。
 
-如果插件加载自己那份包（通过 profile 的 `node_modules` 的 pnpm），
-dsh-web 用 deepseek-harness 那份，两份是不同的模块实例，gateway
-永远看不到插件的 marker——症状：**"Service has no visible
-typertRemote binding"**。
+历史版本（≤1.0.0）用过 `@Remote` 装饰器 + `TypertRemoteService` 基类，
+那个方案的 marker WeakMap 在模块级 singleton 里，要求 plugin 和
+dsh-web 加载**同一个文件**才能共享 marker。npm 安装会让两边走不同
+的 `node_modules` 路径，得到不同模块实例 → gateway 找不到
+marker → 报 `"Service has no visible typertRemote binding"`。
+当时用 `src/typert-bridge.ts` + `DSH_HARNESS_ROOT` 强行修复，
+npm 装出来的消费者拿不到 deepseek-harness 源码就启动失败。
 
-`src/typert-bridge.ts` 用 `createRequire(import.meta.url)` 直接
-加载 `deepseek-harness/packages/typert/protocol/lib/index.js`（可用
-`DSH_HARNESS_ROOT` 覆盖）。两边现在共享完全相同的模块实例，
-marker map 也共享。**不要"修"成裸的 `@deepseek-ai/dsh-typert-protocol`
-import**——会重新引入 binding 错误。
+Connection RPC 是进程级服务（cordis service），不是模块级
+singleton。**两边天然共享共享同一个** `**ctx.connection**` 实例，
+不需要源码级别的模块对齐，npm 安装即用。
+
+迁移后：
+- 不再有 `src/typert.ts` / `src/typert-bridge.ts` / `src/client/typert-remote.ts`
+- 不再有 `@Remote` 装饰器、`TypertRemoteService` 基类
+- 端点注册走 `src/host/rpc.ts` 的 `dispatch` switch
+- 客户端调用走 `src/client/rpc.ts` 的 `callRpc<T>()` 封装
 
 ### 4.3 为什么 TOML 写盘用 `tmp + rename`
 
@@ -223,9 +232,10 @@ fetch 有 3s `AbortController` 超时，失败时静默返回 `[]`——从不�
   `ctx.xxx`。当前插件注入 `loader`。
 - **TOML 序列化是唯一写盘的地方。** 其它都走 `ctx.settings`（DSH 管理）
   或 `ctx.loader`（DSH 管理）。
-- **客户端面板从不直接调 dbhub**——只能调 host typert 端点。
-  如果面板需要新数据，加一个 `DbhubService` 的 `@Remote` 方法，
-  并在 `src/typert.ts` + `src/client/typert-remote.ts` 加对应条目。
+- **客户端面板从不直接调 dbhub**——只通过 host 的 Connection RPC
+  通道。如果面板需要新数据，加一个 `DbhubService` 公共方法，
+  在 `src/host/rpc.ts` 的 `dispatch` switch 加一个 case，并在
+  `DbhubEndpoint` union（`src/shared/types.ts`）加对应名字。
 - **所有字符串 UI 文案在 `src/client/locales.ts` 中。** 同时加到 `zh`
   和 `en`；中文字典是 key 集来源。
 
@@ -245,20 +255,23 @@ fetch 有 3s `AbortController` 超时，失败时静默返回 `[]`——从不�
 5. 如果字段影响 runtime（比如要传给 dbhub 的新环境变量），更新
    `DbhubRuntime.ensure` 和 `src/index.ts` 的 `onCommit` 签名。
 
-加新 typert 端点时：
+加新 Connection RPC 端点时：
 
-1. `DbhubService` 加 `@Remote()` 方法。
-2. `src/typert.ts` 加 invocation 条目（host）。
-3. `src/client/typert-remote.ts` 加匹配 descriptor（client）。
-4. 两边的 zod schema 都从 `src/shared/types.ts` import —— 单一来源，
-   双向校验。
+1. `DbhubService` 加公共方法（不加装饰器）。
+2. `src/host/rpc.ts` 的 `dispatch` switch 加对应 case。
+3. `DbhubEndpoint` union（`src/shared/types.ts`）加端点名字。
+4. 客户端调用 `callRpc<ReturnType>(ctx, '<endpoint>', payload)`（见
+   `src/client/rpc.ts`）；面板侧自己用 try/catch 接住失败。
+5. 输入/返回类型定义在 `src/shared/types.ts`，host 和 client 两边
+   import 同一份（单一来源）。
 
-调用 dbhub 子进程的后台操作（如 `dbhub/testConnection`）：
+调用 dbhub 子进程的后台操作（如 `testConnection`）：
 - **永远不依赖长驻 dbhub 在跑**。如果你的功能需要 dbhub 但长驻实例
   还没起，就在 dbhub 主仓加一次性 CLI flag（如 `--test-dsn=<dsn>`），
   插件 host `spawn` 一个新子进程跑那次操作后退出。
 - 新增方法挂 `DbhubRuntime` 上（参考 `testDsn(dsn)`），`DbhubService`
-  的 `@Remote` 转调它。子进程 stdout 解析 JSON，stderr 透传带前缀。
+  公共方法直接转调（不加装饰器）。子进程 stdout 解析 JSON，
+  stderr 透传带前缀。
 - 设总超时（`AbortController` 兜底），超时 / spawn 失败 / 解析失败都
   转成结构化结果返回，**不抛** —— 面板永远能拿到可渲染的状态。
 
